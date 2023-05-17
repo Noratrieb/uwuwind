@@ -8,9 +8,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-gimli = "0.27.2"
 libc = { version = "0.2.140", default-features = false, features = ["extra_traits"] }
-memmap2 = "0.5.10"
 
 [profile.dev]
 panic = "abort"
