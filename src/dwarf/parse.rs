@@ -70,16 +70,16 @@ impl ILeb128 {
 }
 
 /// Common Information Entry
-struct Cie<'a> {
+pub struct Cie<'a> {
     /// A constant that gives the number of bytes of the CIE structure, not including
     /// the length field itself (see Section 7.2.2 on page 184). The size of the length
     /// field plus the value of length must be an integral multiple of the address size.
-    length: usize,
+    pub length: usize,
     /// A constant that is used to distinguish CIEs from FDEs.
-    cie_id: Id,
+    pub cie_id: Id,
     /// A version number (see Section 7.24 on page 238). This number is specific to
     /// the call frame information and is independent of the DWARF version number.
-    version: u8,
+    pub version: u8,
     /// A null-terminated UTF-8 string that identifies the augmentation to this CIE or
     /// to the FDEs that use it. If a reader encounters an augmentation string that is
     /// unexpected, then only the following fields can be read:
@@ -95,52 +95,52 @@ struct Cie<'a> {
     ///
     /// Because the .debug_frame section is useful independently of any .debug_info
     /// section, the augmentation string always uses UTF-8 encoding.
-    augmentation: &'a str,
+    pub augmentation: &'a str,
     /// The size of a target address in this CIE and any FDEs that use it, in bytes. If a
     /// compilation unit exists for this frame, its address size must match the address
     /// size here.
-    address_size: u8,
+    pub address_size: u8,
     /// The size of a segment selector in this CIE and any FDEs that use it, in bytes.
-    segment_selector_size: u8,
+    pub segment_selector_size: u8,
     /// A constant that is factored out of all advance location instructions (see
     /// Section 6.4.2.1 on page 177). The resulting value is
     /// (operand * code_alignment_factor).
-    code_alignment_factor: ULeb128,
+    pub code_alignment_factor: ULeb128,
     /// A constant that is factored out of certain offset instructions (see
     /// Sections 6.4.2.2 on page 177 and 6.4.2.3 on page 179). The resulting value is
     /// (operand * data_alignment_factor).
-    data_alignment_factor: ILeb128,
+    pub data_alignment_factor: ILeb128,
     /// An unsigned LEB128 constant that indicates which column in the rule table
     /// represents the return address of the function. Note that this column might not
     /// correspond to an actual machine register.
-    return_address_register: ULeb128,
+    pub return_address_register: ULeb128,
     /// A sequence of rules that are interpreted to create the initial setting of each
     /// column in the table.
     /// The default rule for all columns before interpretation of the initial instructions
     /// is the undefined rule. However, an ABI authoring body or a compilation
     /// system authoring body may specify an alternate default value for any or all
     /// columns.
-    initial_instructions: &'a [u8],
+    pub initial_instructions: &'a [u8],
 }
 
 /// Frame Description Entry
-struct Fde<'a> {
+pub struct Fde<'a> {
     /// A constant that gives the number of bytes of the header and instruction
     /// stream for this function, not including the length field itself (see Section 7.2.2
     /// on page 184). The size of the length field plus the value of length must be an
     /// integral multiple of the address size.
-    length: usize,
+    pub length: usize,
     /// A constant offset into the .debug_frame section that denotes the CIE that is
     /// associated with this FDE.
-    cie_pointer: Id,
+    pub cie_pointer: Id,
     /// The address of the first location associated with this table entry. If the
     /// segment_selector_size field of this FDE’s CIE is non-zero, the initial
     /// location is preceded by a segment selector of the given length.
-    initial_location: usize,
+    pub initial_location: usize,
     /// The number of bytes of program instructions described by this entry.
-    address_range: usize,
+    pub address_range: usize,
     /// A sequence of table defining instructions that are described in Section 6.4.2.
-    instructions: &'a [u8],
+    pub instructions: &'a [u8],
 }
 
 #[derive(Debug)]
@@ -321,6 +321,11 @@ pub enum Instruction {
     /// The DW_CFA_nop instruction has no operands and no required actions. It is
     /// used as padding to make a CIE or FDE an appropriate size.
     Nop,
+}
+
+pub unsafe fn parse_cie(ptr: *const u8) {
+    let len = *ptr.cast::<u32>();
+    trace!("{:x}", len);
 }
 
 pub(super) struct InstrIter {

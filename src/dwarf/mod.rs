@@ -10,4 +10,7 @@ pub use divination::{dwarf_info, DwarfInfo};
 
 pub fn uwutables(dwarf_info: DwarfInfo) {
     trace!("getting uwutables from {:p}", dwarf_info.dwarf);
+    unsafe {
+        parse::parse_cie(dwarf_info.dwarf);
+    }
 }
