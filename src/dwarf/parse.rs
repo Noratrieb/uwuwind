@@ -23,8 +23,10 @@
 //! and the rule to find the value for the previous frame.
 #![allow(non_upper_case_globals)]
 
-struct Expr;
+#[derive(Debug)]
+pub struct Expr;
 
+#[derive(Debug)]
 enum RegisterRule {
     /// A register that has this rule has no recoverable value in the previous frame.
     /// (By convention, it is not preserved by a callee.)
@@ -52,13 +54,15 @@ enum RegisterRule {
 
 type Id = u32;
 
-struct ULeb128(u128);
+#[derive(Debug)]
+pub struct ULeb128(u128);
 impl ULeb128 {
     fn parse() -> Self {
         todo!()
     }
 }
-struct ILeb128(i128);
+#[derive(Debug)]
+pub struct ILeb128(i128);
 impl ILeb128 {
     fn parse() -> Self {
         todo!()
@@ -139,7 +143,8 @@ struct Fde<'a> {
     instructions: &'a [u8],
 }
 
-enum Instruction {
+#[derive(Debug)]
+pub enum Instruction {
     //-------- 6.4.2.1 Row Creation Instructions
     //
     /// The DW_CFA_set_loc instruction takes a single operand that represents a
@@ -318,15 +323,31 @@ enum Instruction {
     Nop,
 }
 
-struct InstrIter<'a> {
-    data: &'a [u8],
+pub(super) struct InstrIter {
+    data: *const u8,
 }
 
-impl<'a> InstrIter<'a> {
+impl InstrIter {
+    /// Create a new `InstrIter` that will parse DWARF call frame information from `data`.
+    /// # Safety
+    /// `data` must be a pointer to valid DWARF call frame information with a null terminator.
+    pub(super) unsafe fn new(data: *const u8) -> Self {
+        Self { data }
+    }
+
     fn advance(&mut self) -> Option<u8> {
-        let (&first, rest) = self.data.split_first()?;
-        self.data = rest;
-        Some(first)
+        // SAFETY: First, we assume that `data` currently points at a valid location.
+        // After we read from it, we increment it. This has implications. We must assume
+        // that the dwarf parsing code in this module never calls `advance` more than it has to.
+        // This means that really `advance` should be unsafe, but marking it as unsafe would only make
+        // the code in here harder to read and not provide practical safety improvements.
+        // We do eagerly move the data pointer outside the bounds of the allocation, but only one
+        // past the end, which is fine.
+        unsafe {
+            let first = self.data.read();
+            self.data = self.data.add(1);
+            Some(first)
+        }
     }
 
     fn uleb128(&mut self) -> ULeb128 {
@@ -364,9 +385,10 @@ const DW_CFA_val_expression: u8 = 0x16;
 const DW_CFA_lo_user: u8 = 0x1c;
 const DW_CFA_hi_user: u8 = 0x3f;
 
-impl<'a> Iterator for InstrIter<'a> {
+impl Iterator for InstrIter {
     type Item = Instruction;
 
+    #[allow(unreachable_code)]
     fn next(&mut self) -> Option<Self::Item> {
         let b = self.advance()?;
         let high_2 = b & !(u8::MAX >> 2);

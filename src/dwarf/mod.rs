@@ -8,4 +8,6 @@ mod parse;
 
 pub use divination::{dwarf_info, DwarfInfo};
 
-pub fn uwutables(_dwarf_info: DwarfInfo) {}
+pub fn uwutables(dwarf_info: DwarfInfo) {
+    trace!("getting uwutables from {:p}", dwarf_info.dwarf);
+}

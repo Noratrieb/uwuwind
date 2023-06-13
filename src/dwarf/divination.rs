@@ -30,9 +30,9 @@ extern "C" {
 #[derive(Debug, Clone, Copy)]
 pub struct DwarfInfo {
     /// The text segment
-    map: *const [u8],
+    pub(super) map: *const [u8],
     /// PT_GNU_EH_FRAME
-    dwarf: *const u8,
+    pub(super) dwarf: *const u8,
 }
 
 pub fn dwarf_info(addr: *const ffi::c_void) -> Option<DwarfInfo> {
