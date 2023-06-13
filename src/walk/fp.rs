@@ -1,21 +1,22 @@
 //! Test frame pointer walker. Not very good.
 
 use crate::arch::get_rbp;
+use crate::stdext::trace;
 
 pub(crate) unsafe fn walk() {
     let mut current_rbp = get_rbp();
     loop {
-        println!("walk...   rbp={current_rbp:p}");
+        trace!("walk...   rbp={current_rbp:p}");
 
         let return_addr = current_rbp.add(1).read() as *const usize;
-        println!("walk... return_addr={return_addr:p}");
+        trace!("walk... return_addr={return_addr:p}");
 
-        println!(
+        trace!(
             "walk... frame={:?}",
             crate::identify::identify(return_addr as usize)
         );
 
-        println!("no read yet");
+        trace!("no read yet");
 
         current_rbp = current_rbp.read() as *const usize;
     }

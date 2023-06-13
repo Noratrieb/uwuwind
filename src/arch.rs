@@ -1,5 +1,5 @@
+use core::arch::asm;
 use core::ffi;
-use std::arch::asm;
 
 pub fn get_rbp() -> *const usize {
     let mut out;

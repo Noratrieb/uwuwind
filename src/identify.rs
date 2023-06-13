@@ -1,8 +1,8 @@
-use std::ffi::CStr;
+use core::ffi::CStr;
 
 pub fn identify(addr: usize) -> Option<&'static CStr> {
     unsafe {
-        let mut info: libc::Dl_info = std::mem::zeroed();
+        let mut info: libc::Dl_info = core::mem::zeroed();
 
         libc::dladdr(addr as _, &mut info);
 
