@@ -10,7 +10,7 @@ mod stdext;
 pub mod uw;
 
 mod arch;
-mod dwarf;
+pub mod dwarf;
 mod identify;
 
 mod walk;
@@ -21,8 +21,7 @@ pub unsafe extern "C" fn _UnwindRaiseException(
 ) -> uw::_Unwind_Reason_Code {
     trace!("someone raised an exception with addr {exception_object:p}");
     let di = crate::dwarf::dwarf_info(arch::get_rip() as _).unwrap();
-    crate::dwarf::uwutables(di);
-    // walk::fp::walk();
+    crate::dwarf::uwutables(di.eh_frame);
 
     stdext::abort();
 }

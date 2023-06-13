@@ -29,10 +29,8 @@ extern "C" {
 
 #[derive(Debug, Clone, Copy)]
 pub struct DwarfInfo {
-    /// The text segment
-    pub(super) map: *const [u8],
     /// PT_GNU_EH_FRAME
-    pub(super) dwarf: *const u8,
+    pub(crate) eh_frame: *const u8,
 }
 
 pub fn dwarf_info(addr: *const ffi::c_void) -> Option<DwarfInfo> {
@@ -62,8 +60,7 @@ pub fn dwarf_info(addr: *const ffi::c_void) -> Option<DwarfInfo> {
         }
 
         Some(DwarfInfo {
-            map: core::ptr::slice_from_raw_parts(out.dlfo_map_start as _, text_len),
-            dwarf: out.dlfo_eh_frame as _,
+            eh_frame: out.dlfo_eh_frame as _,
         })
     }
 }

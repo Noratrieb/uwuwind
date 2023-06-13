@@ -11,7 +11,9 @@ edition = "2021"
 libc = { version = "0.2.140", default-features = false, features = ["extra_traits"] }
 
 [profile.dev]
-panic = "abort"
+# the test binary needs uwutables
+panic = "unwind"
 
 [profile.release]
-panic = "abort"
+# the test binary needs uwutables
+panic = "unwind"

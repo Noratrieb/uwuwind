@@ -8,9 +8,9 @@ mod parse;
 
 pub use divination::{dwarf_info, DwarfInfo};
 
-pub fn uwutables(dwarf_info: DwarfInfo) {
-    trace!("getting uwutables from {:p}", dwarf_info.dwarf);
+pub unsafe fn uwutables(eh_frame: *const u8) {
+    trace!("getting uwutables from {:p}", eh_frame);
     unsafe {
-        parse::parse_cie(dwarf_info.dwarf);
+        parse::parse_cie(eh_frame);
     }
 }
