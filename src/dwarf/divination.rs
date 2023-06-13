@@ -37,7 +37,6 @@ pub struct DwarfInfo {
 /// The `.eh_frame_hdr` section.
 /// See <https://refspecs.linuxfoundation.org/LSB_1.3.0/gLSB/gLSB/ehframehdr.html>
 /// and <https://refspecs.linuxbase.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/ehframechpt.html>.
-#[repr(C)]
 struct EhFrameHeader {
     version: u8,
     eh_frame_ptr_enc: EhHeaderEncoded,
@@ -51,7 +50,7 @@ impl EhFrameHeader {
         addr_of!((*self).encoded_fields).cast::<u8>()
     }
 
-    unsafe fn eh_frame(&self, pc: *const ffi::c_void) -> Option<*const u8> {
+    unsafe fn eh_frame(&self) -> Option<*const u8> {
         let ValueFormat::DW_EH_PE_sdata4 = self.eh_frame_ptr_enc.format() else {
             return None;
         };
@@ -61,7 +60,11 @@ impl EhFrameHeader {
 
         let eh_frame_ptr = unsafe { self.encoded_fields().cast::<i32>().read_unaligned() };
 
-        Some(pc.cast::<u8>().offset(eh_frame_ptr as isize))
+        Some(
+            self.encoded_fields()
+                .cast::<u8>()
+                .offset(eh_frame_ptr as isize),
+        )
     }
 
     fn fde_count(&self) -> Option<u64> {
@@ -150,14 +153,14 @@ pub fn dwarf_info(addr: *const ffi::c_void) -> Option<DwarfInfo> {
         }
 
         let header = &*out.dlfo_eh_frame.cast::<EhFrameHeader>();
+
         if header.version != 1 {
             trace!("eh_frame_hdr version is not 1");
             return None;
         }
-
         trace!("eh_frame_hdr: {:#?}", header);
 
-        let Some(ptr) = header.eh_frame(addr) else {
+        let Some(ptr) = header.eh_frame() else {
             trace!("could not find .eh_frame");
             return None;
         };
