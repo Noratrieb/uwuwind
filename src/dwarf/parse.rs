@@ -332,6 +332,7 @@ impl InstrIter {
     /// # Safety
     /// `data` must be a pointer to valid DWARF call frame information with a null terminator.
     pub(super) unsafe fn new(data: *const u8) -> Self {
+        // SAFETY: uses random ass pointer
         Self { data }
     }
 
