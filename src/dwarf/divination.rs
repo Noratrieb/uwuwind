@@ -11,9 +11,11 @@
 
 #![allow(non_camel_case_types)]
 
-use core::{ffi, fmt, ptr::addr_of};
+use core::{ffi, fmt};
 
 use crate::stdext::with_last_os_error_str;
+
+use crate::Addr;
 
 #[repr(C)]
 struct dl_find_object {
@@ -37,62 +39,101 @@ pub struct DwarfInfo {
 /// The `.eh_frame_hdr` section.
 /// See <https://refspecs.linuxfoundation.org/LSB_1.3.0/gLSB/gLSB/ehframehdr.html>
 /// and <https://refspecs.linuxbase.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/ehframechpt.html>.
+#[derive(Debug)]
 struct EhFrameHeader {
     version: u8,
-    eh_frame_ptr_enc: EhHeaderEncoded,
-    fde_count_enc: EhHeaderEncoded,
-    table_enc: EhHeaderEncoded,
-    encoded_fields: (),
+    eh_frame_ptr_enc: Encoding,
+    fde_count_enc: Encoding,
+    table_enc: Encoding,
 }
 
-impl EhFrameHeader {
-    unsafe fn encoded_fields(&self) -> *const u8 {
-        addr_of!((*self).encoded_fields).cast::<u8>()
-    }
-
-    unsafe fn eh_frame(&self) -> Option<*const u8> {
-        let ValueFormat::DW_EH_PE_sdata4 = self.eh_frame_ptr_enc.format() else {
+fn eh_frame_hdr_ptr(addr: Addr) -> Option<*const EhFrameHeader> {
+    unsafe {
+        let mut out = core::mem::zeroed();
+        let ret = _dl_find_object(addr.voidptr(), &mut out);
+        trace!("_dl_find_object returned {ret}");
+        if ret != 0 {
+            with_last_os_error_str(|err| trace!("dl_find_object error: {err}"));
             return None;
-        };
-        let ValueApplication::DW_EH_PE_pcrel = self.eh_frame_ptr_enc.application() else {
+        }
+        if out.dlfo_eh_frame.is_null() {
+            trace!("dlfo_eh_frame is null");
             return None;
-        };
+        }
 
-        let eh_frame_ptr = unsafe { self.encoded_fields().cast::<i32>().read_unaligned() };
+        let text_len = out.dlfo_map_end as usize - out.dlfo_map_start as usize;
+        trace!(
+            "dwarf info; map: ({:p}, {:x}), dlfo_map_end: {:p}",
+            out.dlfo_map_start,
+            text_len,
+            out.dlfo_eh_frame
+        );
 
-        Some(
-            self.encoded_fields()
-                .cast::<u8>()
-                .offset(eh_frame_ptr as isize),
-        )
-    }
-
-    fn fde_count(&self) -> Option<u64> {
-        let ValueFormat::DW_EH_PE_udata4 = self.fde_count_enc.format() else {
+        if !(out.dlfo_map_start..out.dlfo_map_end).contains(&addr.voidptr()) {
+            trace!("dl_find_object returned object out of range for addr: {addr:?}");
             return None;
-        };
-        let ValueApplication::DW_EH_PE_absptr = self.fde_count_enc.application() else {
-            return None;
-        };
-        let fde_count = unsafe { self.encoded_fields().add(4).cast::<u32>().read() };
-        Some(fde_count as _)
+        }
+
+        Some(out.dlfo_eh_frame.cast::<EhFrameHeader>())
     }
 }
 
-impl fmt::Debug for EhFrameHeader {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("EhFrameHeader")
-            .field("version", &self.version)
-            .field("eh_frame_ptr_enc", &self.eh_frame_ptr_enc)
-            .field("fde_count_enc", &self.fde_count_enc)
-            .field("table_enc", &self.table_enc)
-            .field("fde_count", &self.fde_count())
-            .finish()
+pub(crate) fn dwarf_info(addr: Addr) -> Option<DwarfInfo> {
+    unsafe {
+        let ptr = eh_frame_hdr_ptr(addr)?;
+        let header = ptr.read();
+        let ptr = ptr.cast::<u8>().add(4);
+
+        if header.version != 1 {
+            trace!("eh_frame_hdr version is not 1");
+            return None;
+        }
+
+        trace!("eh_frame_hdr: {:#?}", header);
+
+        let (ptr, eh_frame_ptr) = read_encoded(ptr, header.eh_frame_ptr_enc);
+        let (_ptr, fde_count) = read_encoded(ptr, header.fde_count_enc);
+
+        trace!("eh_frame: {eh_frame_ptr:?}");
+        trace!("fde_count: {fde_count:?}");
+
+        trace!(
+            "eh_frame start: {:x?}",
+            core::slice::from_raw_parts(eh_frame_ptr as *const u8, 10)
+        );
+
+        crate::stdext::abort();
     }
 }
 
-struct EhHeaderEncoded(u8);
-impl EhHeaderEncoded {
+unsafe fn read_encoded(ptr: *const u8, encoding: Encoding) -> (*const u8, usize) {
+    let (new_ptr, value) = match encoding.format() {
+        ValueFormat::DW_EH_PE_uleb128 => todo!("uleb128"),
+        ValueFormat::DW_EH_PE_udata2 => (ptr.add(2), ptr.cast::<u16>().read_unaligned() as usize),
+        ValueFormat::DW_EH_PE_udata4 => (ptr.add(4), ptr.cast::<u32>().read_unaligned() as usize),
+        ValueFormat::DW_EH_PE_udata8 => (ptr.add(8), ptr.cast::<u64>().read_unaligned() as usize),
+        ValueFormat::DW_EH_PE_sleb128 => todo!("sleb128"),
+        ValueFormat::DW_EH_PE_sdata2 => (ptr.add(2), ptr.cast::<i16>().read_unaligned() as usize),
+        ValueFormat::DW_EH_PE_sdata4 => (ptr.add(4), ptr.cast::<i32>().read_unaligned() as usize),
+        ValueFormat::DW_EH_PE_sdata8 => (ptr.add(8), ptr.cast::<i64>().read_unaligned() as usize),
+    };
+
+    trace!("{ptr:p}, {value}");
+
+    let value = match encoding.application() {
+        ValueApplication::DW_EH_PE_absptr => value,
+        ValueApplication::DW_EH_PE_pcrel => ((value as isize) + (ptr as isize)) as usize,
+        ValueApplication::DW_EH_PE_textrel => todo!("textrel"),
+        ValueApplication::DW_EH_PE_datarel => todo!("datarel"),
+        ValueApplication::DW_EH_PE_funcrel => todo!("funcrel"),
+        ValueApplication::DW_EH_PE_aligned => todo!("aligned"),
+    };
+
+    (new_ptr, value)
+}
+
+struct Encoding(u8);
+impl Encoding {
     fn format(&self) -> ValueFormat {
         match self.0 & 0b1111 {
             0x01 => ValueFormat::DW_EH_PE_uleb128,
@@ -119,56 +160,9 @@ impl EhHeaderEncoded {
     }
 }
 
-impl fmt::Debug for EhHeaderEncoded {
+impl fmt::Debug for Encoding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?} | {:?}", self.application(), self.format())
-    }
-}
-
-pub fn dwarf_info(addr: *const ffi::c_void) -> Option<DwarfInfo> {
-    unsafe {
-        let mut out = core::mem::zeroed();
-        let ret = _dl_find_object(addr, &mut out);
-        trace!("_dl_find_object returned {ret}");
-        if ret != 0 {
-            with_last_os_error_str(|err| trace!("dl_find_object error: {err}"));
-            return None;
-        }
-        if out.dlfo_eh_frame.is_null() {
-            trace!("dlfo_eh_frame is null");
-            return None;
-        }
-
-        let text_len = out.dlfo_map_end as usize - out.dlfo_map_start as usize;
-        trace!(
-            "dwarf info; map: ({:p}, {:x}), dlfo_map_end: {:p}",
-            out.dlfo_map_start,
-            text_len,
-            out.dlfo_eh_frame
-        );
-
-        if !(out.dlfo_map_start..out.dlfo_map_end).contains(&addr) {
-            trace!("dl_find_object returned object out of range for addr: {addr:p}");
-            return None;
-        }
-
-        let header = &*out.dlfo_eh_frame.cast::<EhFrameHeader>();
-
-        if header.version != 1 {
-            trace!("eh_frame_hdr version is not 1");
-            return None;
-        }
-        trace!("eh_frame_hdr: {:#?}", header);
-
-        let Some(ptr) = header.eh_frame() else {
-            trace!("could not find .eh_frame");
-            return None;
-        };
-        trace!("eh_frame pointer: {ptr:?}");
-
-        trace!("eh_frame start: {:?}", core::slice::from_raw_parts(ptr, 10));
-
-        crate::stdext::abort();
     }
 }
 

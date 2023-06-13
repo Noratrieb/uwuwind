@@ -6,7 +6,7 @@
 mod divination;
 mod parse;
 
-pub use divination::{dwarf_info, DwarfInfo};
+pub(crate) use divination::dwarf_info;
 
 pub unsafe fn uwutables(eh_frame: *const u8) {
     trace!("getting uwutables from {:p}", eh_frame);

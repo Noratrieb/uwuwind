@@ -4,7 +4,7 @@ use crate::arch::get_rbp;
 use crate::stdext::trace;
 
 pub(crate) unsafe fn walk() {
-    let mut current_rbp = get_rbp();
+    let mut current_rbp = get_rbp().0.cast::<usize>();
     loop {
         trace!("walk...   rbp={current_rbp:p}");
 

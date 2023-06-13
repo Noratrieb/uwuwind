@@ -1,7 +1,8 @@
 use core::arch::asm;
-use core::ffi;
 
-pub fn get_rbp() -> *const usize {
+use crate::Addr;
+
+pub(crate) fn get_rbp() -> Addr {
     let mut out;
     unsafe {
         asm!(
@@ -10,10 +11,10 @@ pub fn get_rbp() -> *const usize {
             options(nostack, readonly)
         );
     }
-    out
+    Addr(out)
 }
 
-pub fn get_rip() -> *const ffi::c_void {
+pub(crate) fn get_rip() -> Addr {
     let mut out;
     unsafe {
         asm!(
@@ -22,5 +23,5 @@ pub fn get_rip() -> *const ffi::c_void {
             options(nostack, readonly),
         );
     }
-    out
+    Addr(out)
 }

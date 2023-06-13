@@ -1,7 +1,7 @@
 #![no_std]
 #![allow(dead_code)]
 
-use core::sync::atomic::AtomicPtr;
+use core::{ffi, sync::atomic::AtomicPtr};
 
 // Get the macros into our local prelude.
 #[macro_use]
@@ -15,12 +15,21 @@ mod identify;
 
 mod walk;
 
+#[derive(Debug, Clone, Copy)]
+struct Addr(*const ());
+
+impl Addr {
+    fn voidptr(self) -> *const ffi::c_void {
+        self.0.cast()
+    }
+}
+
 #[allow(nonstandard_style)]
 pub unsafe extern "C" fn _UnwindRaiseException(
     exception_object: *mut uw::_Unwind_Exception,
 ) -> uw::_Unwind_Reason_Code {
     trace!("someone raised an exception with addr {exception_object:p}");
-    let _di = crate::dwarf::dwarf_info(arch::get_rip() as _).unwrap();
+    let _di = crate::dwarf::dwarf_info(arch::get_rip()).unwrap();
     crate::dwarf::uwutables(core::ptr::null());
 
     stdext::abort();
