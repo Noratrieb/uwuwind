@@ -1,8 +1,16 @@
-#include<stdio.h>
+#include <stdio.h>
 #define __USE_GNU
-#include<dlfcn.h>
-#include<elf.h>
+#include <dlfcn.h>
+#include <elf.h>
 
-int main() {
-    printf("%d", PT_GNU_EH_FRAME);
+void *get_eh_frame(void *addr)
+{
+    struct dl_find_object out;
+    int ret = _dl_find_object(addr, &out);
+    if (ret != 0)
+    {
+        return NULL;
+    }
+
+    return out.dlfo_eh_frame;
 }

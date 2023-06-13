@@ -22,15 +22,14 @@ pub fn print(args: fmt::Arguments<'_>) -> fmt::Result {
     write!(LibCStdoutWriter, "{}", args)
 }
 
-macro_rules! print {
-    ($($tt:tt)*) => {{
-       $crate::stdext::print(format_args!($($tt)*)).unwrap();
-    }};
-}
-
 macro_rules! trace {
     ($($tt:tt)*) => {
-        print!("UWUWIND TRACE | uwuwind/{}:{}: {}\n", file!(), line!(), format_args!($($tt)*))
+        // We separate out the format_args for rust-analyzer support.
+        match format_args!($($tt)*) {
+            args => {
+                $crate::stdext::print(::core::format_args!("UWUWIND TRACE | uwuwind/{}:{}: {}\n", file!(), line!(), args)).expect("failed to trace")
+            }
+        }
     };
 }
 
@@ -48,11 +47,6 @@ fn errno() -> i32 {
 
 pub(crate) fn with_last_os_error_str<R>(f: impl FnOnce(&str) -> R) -> R {
     let mut buf: [u8; 512] = [0; 512];
-
-    extern "C" {
-        // the libc crate only has the definition for the POSIX version, but a GNU system has the GNU version.
-        fn strerror_r(errnum: i32, buf: *mut ffi::c_char, buflen: usize) -> i32;
-    }
 
     // SAFETY: Our buffer length is passed correctly
     let error = unsafe { libc::strerror_r(errno(), buf.as_mut_ptr().cast(), buf.len()) };
