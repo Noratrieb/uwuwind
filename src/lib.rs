@@ -1,5 +1,7 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 #![allow(dead_code)]
+
+extern crate alloc;
 
 use core::{ffi, sync::atomic::AtomicPtr};
 
@@ -29,8 +31,7 @@ pub unsafe extern "C" fn _UnwindRaiseException(
     exception_object: *mut uw::_Unwind_Exception,
 ) -> uw::_Unwind_Reason_Code {
     trace!("someone raised an exception with addr {exception_object:p}");
-    let _di = crate::dwarf::dwarf_info(arch::get_rip()).unwrap();
-    crate::dwarf::uwutables(core::ptr::null());
+    let _ = crate::dwarf::eh_frame(arch::get_rip()).unwrap();
 
     stdext::abort();
 }

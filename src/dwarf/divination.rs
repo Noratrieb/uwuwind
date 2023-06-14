@@ -23,17 +23,12 @@ struct dl_find_object {
     dlfo_map_start: *const ffi::c_void,
     dlfo_map_end: *const ffi::c_void,
     dlf_link_map: *const ffi::c_void,
+    /// A pointer to the `PT_GNU_EH_FRAME` segment (the `.eh_frame_hdr` section).
     dlfo_eh_frame: *const ffi::c_void,
 }
 
 extern "C" {
     fn _dl_find_object(address: *const ffi::c_void, result: *mut dl_find_object) -> ffi::c_int;
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct DwarfInfo {
-    /// A pointer to the `PT_GNU_EH_FRAME` segment (the `.eh_frame_hdr` section).
-    pub(crate) eh_frame_hdr: *const u8,
 }
 
 /// The `.eh_frame_hdr` section.
@@ -78,7 +73,7 @@ fn eh_frame_hdr_ptr(addr: Addr) -> Option<*const EhFrameHeader> {
     }
 }
 
-pub(crate) fn dwarf_info(addr: Addr) -> Option<DwarfInfo> {
+pub(crate) fn eh_frame(addr: Addr) -> Option<*const u8> {
     unsafe {
         let ptr = eh_frame_hdr_ptr(addr)?;
         let header = ptr.read();
@@ -99,10 +94,12 @@ pub(crate) fn dwarf_info(addr: Addr) -> Option<DwarfInfo> {
 
         trace!(
             "eh_frame start: {:x?}",
-            core::slice::from_raw_parts(eh_frame_ptr as *const u8, 10)
+            core::slice::from_raw_parts(eh_frame_ptr as *const u8, 15)
         );
 
-        crate::stdext::abort();
+        crate::dwarf::uwutables(eh_frame_ptr as *const u8);
+
+        Some(eh_frame_ptr as *const u8)
     }
 }
 
@@ -117,8 +114,6 @@ unsafe fn read_encoded(ptr: *const u8, encoding: Encoding) -> (*const u8, usize)
         ValueFormat::DW_EH_PE_sdata4 => (ptr.add(4), ptr.cast::<i32>().read_unaligned() as usize),
         ValueFormat::DW_EH_PE_sdata8 => (ptr.add(8), ptr.cast::<i64>().read_unaligned() as usize),
     };
-
-    trace!("{ptr:p}, {value}");
 
     let value = match encoding.application() {
         ValueApplication::DW_EH_PE_absptr => value,

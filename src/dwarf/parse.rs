@@ -23,6 +23,19 @@
 //! and the rule to find the value for the previous frame.
 #![allow(non_upper_case_globals)]
 
+#[cfg(test)]
+mod tests;
+
+use core::ffi::CStr;
+
+use alloc::{format, string::String};
+
+/// The dwarf is invalid. This is fatal and should never happen.
+#[derive(Debug)]
+pub struct Error(String);
+
+type Result<T, E = Error> = core::result::Result<T, E>;
+
 #[derive(Debug)]
 pub struct Expr;
 
@@ -70,16 +83,8 @@ impl ILeb128 {
 }
 
 /// Common Information Entry
+#[derive(Debug, PartialEq)]
 pub struct Cie<'a> {
-    /// A constant that gives the number of bytes of the CIE structure, not including
-    /// the length field itself (see Section 7.2.2 on page 184). The size of the length
-    /// field plus the value of length must be an integral multiple of the address size.
-    pub length: usize,
-    /// A constant that is used to distinguish CIEs from FDEs.
-    pub cie_id: Id,
-    /// A version number (see Section 7.24 on page 238). This number is specific to
-    /// the call frame information and is independent of the DWARF version number.
-    pub version: u8,
     /// A null-terminated UTF-8 string that identifies the augmentation to this CIE or
     /// to the FDEs that use it. If a reader encounters an augmentation string that is
     /// unexpected, then only the following fields can be read:
@@ -96,24 +101,22 @@ pub struct Cie<'a> {
     /// Because the .debug_frame section is useful independently of any .debug_info
     /// section, the augmentation string always uses UTF-8 encoding.
     pub augmentation: &'a str,
-    /// The size of a target address in this CIE and any FDEs that use it, in bytes. If a
-    /// compilation unit exists for this frame, its address size must match the address
-    /// size here.
-    pub address_size: u8,
-    /// The size of a segment selector in this CIE and any FDEs that use it, in bytes.
-    pub segment_selector_size: u8,
     /// A constant that is factored out of all advance location instructions (see
     /// Section 6.4.2.1 on page 177). The resulting value is
     /// (operand * code_alignment_factor).
-    pub code_alignment_factor: ULeb128,
+    pub code_alignment_factor: u128,
     /// A constant that is factored out of certain offset instructions (see
     /// Sections 6.4.2.2 on page 177 and 6.4.2.3 on page 179). The resulting value is
     /// (operand * data_alignment_factor).
-    pub data_alignment_factor: ILeb128,
+    pub data_alignment_factor: i128,
     /// An unsigned LEB128 constant that indicates which column in the rule table
     /// represents the return address of the function. Note that this column might not
     /// correspond to an actual machine register.
-    pub return_address_register: ULeb128,
+    pub return_address_register: u128,
+    /// A block of data whose contents are defined by the contents of the Augmentation
+    /// String as described below. This field is only present if the Augmentation String
+    /// contains the character 'z'. The size of this data is given by the Augentation Length.
+    pub augmentation_data: Option<&'a [u8]>,
     /// A sequence of rules that are interpreted to create the initial setting of each
     /// column in the table.
     /// The default rule for all columns before interpretation of the initial instructions
@@ -323,9 +326,118 @@ pub enum Instruction {
     Nop,
 }
 
-pub unsafe fn parse_cie(ptr: *const u8) {
-    let len = *ptr.cast::<u32>();
-    trace!("{:x}", len);
+pub unsafe fn parse_cfi(ptr: *const u8) {
+    parse_cie(ptr).unwrap();
+}
+
+struct Cursor<'a>(&'a [u8]);
+
+fn read_bytes<'a>(data: &mut Cursor<'a>, amount: usize) -> Result<&'a [u8]> {
+    if data.0.len() < amount {
+        return Err(Error(format!(
+            "index out of bounds, tried to read {amount} bytes from {}",
+            data.0.len()
+        )));
+    } else {
+        let result = &data.0[..amount];
+        data.0 = &data.0[amount..];
+        Ok(result)
+    }
+}
+fn read_u32(data: &mut Cursor<'_>) -> Result<u32> {
+    let int = read_bytes(data, 4)?;
+    Ok(u32::from_le_bytes(int.try_into().unwrap()))
+}
+fn read_u8(data: &mut Cursor<'_>) -> Result<u8> {
+    let int = read_bytes(data, 1)?;
+    Ok(int[0])
+}
+fn read_utf8_cstr<'a>(data: &mut Cursor<'a>) -> Result<&'a str> {
+    let cstr: &CStr = CStr::from_bytes_until_nul(data.0)
+        .map_err(|_| Error("no null terminator found for string".into()))?;
+    let utf8 = cstr
+        .to_str()
+        .map_err(|e| Error(format!("invalid utf8: {e:?}")))?;
+    data.0 = &data.0[(utf8.len() + 1)..];
+    Ok(utf8)
+}
+fn read_uleb128(data: &mut Cursor<'_>) -> Result<u128> {
+    let mut result = 0;
+    let mut shift = 0;
+    loop {
+        let byte = read_u8(data)?;
+        result |= ((byte & 0b0111_1111) << shift) as u128;
+        if (byte >> 7) == 0 {
+            break;
+        }
+        shift += 7;
+    }
+    Ok(result)
+}
+fn read_ileb128(data: &mut Cursor<'_>) -> Result<i128> {
+    let mut result = 0;
+    let mut shift = 0;
+    let size = 8;
+
+    let sign_bit_set = loop {
+        let byte = read_u8(data)?;
+        result |= ((byte & 0b0111_1111) << shift) as i128;
+        shift += 7;
+        if (byte >> 7) == 0 {
+            let sign_bit_set = ((byte >> 6) & 1) == 1;
+            break sign_bit_set;
+        }
+    };
+    if (shift < size) && sign_bit_set {
+        result |= -(1 << shift);
+    }
+    Ok(result)
+}
+
+unsafe fn parse_cie<'a>(ptr: *const u8) -> Result<Cie<'a>> {
+    let len = ptr.cast::<u32>().read();
+    if len == 0xffffffff {
+        todo!("loooong dwarf, cannot handle.");
+    }
+    let data = &mut Cursor(core::slice::from_raw_parts(ptr.add(4), len as usize));
+    trace!("{:x?}", data.0);
+
+    let cie_id = read_u32(data)?;
+    if cie_id != 0 {
+        return Err(Error(format!("not a CIE"))); // TODO: we need to parse an FDE here.
+    }
+
+    let version = read_u8(data)?;
+    if version != 1 {
+        return Err(Error(format!("version must be 1: {version}")));
+    }
+
+    let augmentation = read_utf8_cstr(data)?;
+    let code_alignment_factor = read_uleb128(data)?;
+    let data_alignment_factor = read_ileb128(data)?;
+    let return_address_register = read_uleb128(data)?;
+
+    let augmentation_data = if augmentation.starts_with('z') {
+        let aug_len = read_uleb128(data)?;
+        let aug_data = read_bytes(data, aug_len as usize)?;
+        Some(aug_data)
+    } else {
+        None
+    };
+
+    let initial_instructions = data.0;
+
+    let cie = Cie {
+        augmentation,
+        code_alignment_factor,
+        data_alignment_factor,
+        return_address_register,
+        augmentation_data,
+        initial_instructions,
+    };
+
+    trace!("total_len={len} {cie:#?}");
+    Ok(cie)
 }
 
 pub(super) struct InstrIter {
