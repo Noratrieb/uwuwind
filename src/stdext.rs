@@ -50,7 +50,8 @@ pub(crate) fn with_last_os_error_str<R>(f: impl FnOnce(&str) -> R) -> R {
 
     // SAFETY: Our buffer length is passed correctly
     let error = unsafe { libc::strerror_r(errno(), buf.as_mut_ptr().cast(), buf.len()) };
-    // SAFETY: strerror_r writes the string to buf, even if it didnt write anything, we did zero init it.
+    // SAFETY: strerror_r writes the string to buf, even if it didnt write anything,
+    // we did zero init it.
     let cstr = if error != 0 {
         ffi::CStr::from_bytes_with_nul(b"<strerror_r returned an error>\n").unwrap()
     } else {

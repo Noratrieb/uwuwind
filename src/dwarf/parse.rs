@@ -11,16 +11,17 @@
 //! LN
 //! ```
 //!
-//! The first column is the address for every location that contains code in a program
-//! (a relative offset in shared object files). The remaining columns contain unwinding rules
-//! that are associated with the indicated location.
+//! The first column is the address for every location that contains code in a
+//! program (a relative offset in shared object files). The remaining columns
+//! contain unwinding rules that are associated with the indicated location.
 //!
 //! The CFA column defines the rule which computes the Canonical Frame Address
-//! value; it may be either a register and a signed offset that are added together, or a
-//! DWARF expression that is evaluated.
+//! value; it may be either a register and a signed offset that are added
+//! together, or a DWARF expression that is evaluated.
 //!
-//! The remaining columns describe register numbers that indicate whether a register has been saved
-//! and the rule to find the value for the previous frame.
+//! The remaining columns describe register numbers that indicate whether a
+//! register has been saved and the rule to find the value for the previous
+//! frame.
 #![allow(non_upper_case_globals)]
 
 #[cfg(test)]
@@ -28,7 +29,8 @@ mod tests;
 
 use core::ffi::CStr;
 
-use alloc::{format, string::String};
+use alloc::format;
+use alloc::string::String;
 
 /// The dwarf is invalid. This is fatal and should never happen.
 #[derive(Debug)]
@@ -41,25 +43,27 @@ pub struct Expr;
 
 #[derive(Debug)]
 enum RegisterRule {
-    /// A register that has this rule has no recoverable value in the previous frame.
-    /// (By convention, it is not preserved by a callee.)
+    /// A register that has this rule has no recoverable value in the previous
+    /// frame. (By convention, it is not preserved by a callee.)
     Undefined,
     /// This register has not been modified from the previous frame.
-    /// (By convention, it is preserved by the callee, but the callee has not modified it.)
+    /// (By convention, it is preserved by the callee, but the callee has not
+    /// modified it.)
     SameValue,
-    /// The previous value of this register is saved at the address CFA+N where CFA
-    /// is the current CFA value and N is a signed offset
+    /// The previous value of this register is saved at the address CFA+N where
+    /// CFA is the current CFA value and N is a signed offset
     Offset(isize),
-    /// The previous value of this register is the value CFA+N where CFA is the current CFA value
-    /// and N is a signed offset.
+    /// The previous value of this register is the value CFA+N where CFA is the
+    /// current CFA value and N is a signed offset.
     ValOffset(isize),
-    /// The previous value of this register is stored in another register numbered R.
+    /// The previous value of this register is stored in another register
+    /// numbered R.
     Register(u16),
-    /// The previous value of this register is located at the address produced by
-    /// executing the DWARF expression E (see Section 2.5 on page 26)
+    /// The previous value of this register is located at the address produced
+    /// by executing the DWARF expression E (see Section 2.5 on page 26)
     Expression(Expr),
-    /// The previous value of this register is the value produced by executing the DWARF
-    /// expression E (see Section 2.5 on page 26).
+    /// The previous value of this register is the value produced by executing
+    /// the DWARF expression E (see Section 2.5 on page 26).
     ValExpression(Expr),
     ///  The rule is defined externally to this specification by the augmenter.
     Architectural,
@@ -85,44 +89,48 @@ impl ILeb128 {
 /// Common Information Entry
 #[derive(Debug, PartialEq)]
 pub struct Cie<'a> {
-    /// A null-terminated UTF-8 string that identifies the augmentation to this CIE or
-    /// to the FDEs that use it. If a reader encounters an augmentation string that is
-    /// unexpected, then only the following fields can be read:
+    /// A null-terminated UTF-8 string that identifies the augmentation to this
+    /// CIE or to the FDEs that use it. If a reader encounters an
+    /// augmentation string that is unexpected, then only the following
+    /// fields can be read:
     /// - CIE: length, CIE_id, version, augmentation
     /// - FDE: length, CIE_pointer, initial_location, address_range
     ///
     /// If there is no augmentation, this value is a zero byte.
     ///
-    /// The augmentation string allows users to indicate that there is additional
-    /// target-specific information in the CIE or FDE which is needed to virtually unwind a
-    /// stack frame. For example, this might be information about dynamically allocated data
-    /// which needs to be freed on exit from the routine.
+    /// The augmentation string allows users to indicate that there is
+    /// additional target-specific information in the CIE or FDE which is
+    /// needed to virtually unwind a stack frame. For example, this might be
+    /// information about dynamically allocated data which needs to be freed
+    /// on exit from the routine.
     ///
-    /// Because the .debug_frame section is useful independently of any .debug_info
-    /// section, the augmentation string always uses UTF-8 encoding.
+    /// Because the .debug_frame section is useful independently of any
+    /// .debug_info section, the augmentation string always uses UTF-8
+    /// encoding.
     pub augmentation: &'a str,
-    /// A constant that is factored out of all advance location instructions (see
-    /// Section 6.4.2.1 on page 177). The resulting value is
+    /// A constant that is factored out of all advance location instructions
+    /// (see Section 6.4.2.1 on page 177). The resulting value is
     /// (operand * code_alignment_factor).
     pub code_alignment_factor: u128,
     /// A constant that is factored out of certain offset instructions (see
-    /// Sections 6.4.2.2 on page 177 and 6.4.2.3 on page 179). The resulting value is
-    /// (operand * data_alignment_factor).
+    /// Sections 6.4.2.2 on page 177 and 6.4.2.3 on page 179). The resulting
+    /// value is (operand * data_alignment_factor).
     pub data_alignment_factor: i128,
-    /// An unsigned LEB128 constant that indicates which column in the rule table
-    /// represents the return address of the function. Note that this column might not
-    /// correspond to an actual machine register.
+    /// An unsigned LEB128 constant that indicates which column in the rule
+    /// table represents the return address of the function. Note that this
+    /// column might not correspond to an actual machine register.
     pub return_address_register: u128,
-    /// A block of data whose contents are defined by the contents of the Augmentation
-    /// String as described below. This field is only present if the Augmentation String
-    /// contains the character 'z'. The size of this data is given by the Augentation Length.
+    /// A block of data whose contents are defined by the contents of the
+    /// Augmentation String as described below. This field is only present
+    /// if the Augmentation String contains the character 'z'. The size of
+    /// this data is given by the Augentation Length.
     pub augmentation_data: Option<&'a [u8]>,
-    /// A sequence of rules that are interpreted to create the initial setting of each
-    /// column in the table.
-    /// The default rule for all columns before interpretation of the initial instructions
-    /// is the undefined rule. However, an ABI authoring body or a compilation
-    /// system authoring body may specify an alternate default value for any or all
-    /// columns.
+    /// A sequence of rules that are interpreted to create the initial setting
+    /// of each column in the table.
+    /// The default rule for all columns before interpretation of the initial
+    /// instructions is the undefined rule. However, an ABI authoring body
+    /// or a compilation system authoring body may specify an alternate
+    /// default value for any or all columns.
     pub initial_instructions: &'a [u8],
 }
 
@@ -130,20 +138,22 @@ pub struct Cie<'a> {
 #[derive(Debug, PartialEq)]
 pub struct Fde<'a> {
     /// A constant that gives the number of bytes of the header and instruction
-    /// stream for this function, not including the length field itself (see Section 7.2.2
-    /// on page 184). The size of the length field plus the value of length must be an
-    /// integral multiple of the address size.
+    /// stream for this function, not including the length field itself (see
+    /// Section 7.2.2 on page 184). The size of the length field plus the
+    /// value of length must be an integral multiple of the address size.
     pub length: usize,
-    /// A constant offset into the .debug_frame section that denotes the CIE that is
-    /// associated with this FDE.
+    /// A constant offset into the .debug_frame section that denotes the CIE
+    /// that is associated with this FDE.
     pub cie_pointer: Id,
-    /// The address of the first location associated with this table entry. If the
-    /// segment_selector_size field of this FDE’s CIE is non-zero, the initial
-    /// location is preceded by a segment selector of the given length.
+    /// The address of the first location associated with this table entry. If
+    /// the segment_selector_size field of this FDE’s CIE is non-zero, the
+    /// initial location is preceded by a segment selector of the given
+    /// length.
     pub initial_location: usize,
     /// The number of bytes of program instructions described by this entry.
     pub address_range: usize,
-    /// A sequence of table defining instructions that are described in Section 6.4.2.
+    /// A sequence of table defining instructions that are described in Section
+    /// 6.4.2.
     pub instructions: &'a [u8],
 }
 
@@ -152,17 +162,20 @@ pub enum Instruction {
     //-------- 6.4.2.1 Row Creation Instructions
     //
     /// The DW_CFA_set_loc instruction takes a single operand that represents a
-    /// target address. The required action is to create a new table row using the
-    /// specified address as the location. All other values in the new row are initially
-    /// identical to the current row. The new location value is always greater than the
-    /// current one. If the segment_selector_size field of this FDE’s CIE is non-zero,
-    /// the initial location is preceded by a segment selector of the given length.
+    /// target address. The required action is to create a new table row using
+    /// the specified address as the location. All other values in the new
+    /// row are initially identical to the current row. The new location
+    /// value is always greater than the current one. If the
+    /// segment_selector_size field of this FDE’s CIE is non-zero,
+    /// the initial location is preceded by a segment selector of the given
+    /// length.
     SetLoc(usize),
     /// The DW_CFA_advance_loc instruction takes a single operand (encoded with
-    /// the opcode) that represents a constant delta. The required action is to create a
-    /// new table row with a location value that is computed by taking the current
-    /// entry’s location value and adding the value of delta * code_alignment_factor.
-    /// All other values in the new row are initially identical to the current row
+    /// the opcode) that represents a constant delta. The required action is to
+    /// create a new table row with a location value that is computed by
+    /// taking the current entry’s location value and adding the value of
+    /// delta * code_alignment_factor. All other values in the new row are
+    /// initially identical to the current row
     AdvanceLoc(u8),
     /// The DW_CFA_advance_loc1 instruction takes a single ubyte operand that
     /// represents a constant delta. This instruction is identical to
@@ -181,67 +194,69 @@ pub enum Instruction {
     //
     /// The DW_CFA_def_cfa instruction takes two unsigned LEB128 operands
     /// representing a register number and a (non-factored) offset. The required
-    /// action is to define the current CFA rule to use the provided register and offset
+    /// action is to define the current CFA rule to use the provided register
+    /// and offset
     DefCfa {
         register_number: ULeb128,
         offset: ULeb128,
     },
     /// The DW_CFA_def_cfa_sf instruction takes two operands: an unsigned
     /// LEB128 value representing a register number and a signed LEB128 factored
-    /// offset. This instruction is identical to DW_CFA_def_cfa except that the second
-    /// operand is signed and factored. The resulting offset is factored_offset *
-    /// data_alignment_factor.
+    /// offset. This instruction is identical to DW_CFA_def_cfa except that the
+    /// second operand is signed and factored. The resulting offset is
+    /// factored_offset * data_alignment_factor.
     DefCfaSf {
         register_number: ULeb128,
         offset: ULeb128,
     },
     /// The DW_CFA_def_cfa_register instruction takes a single unsigned LEB128
-    /// operand representing a register number. The required action is to define the
-    /// current CFA rule to use the provided register (but to keep the old offset). This
-    /// operation is valid only if the current CFA rule is defined to use a register and
-    /// offset.
+    /// operand representing a register number. The required action is to define
+    /// the current CFA rule to use the provided register (but to keep the
+    /// old offset). This operation is valid only if the current CFA rule is
+    /// defined to use a register and offset.
     DefCfaRegister(ULeb128),
     /// The DW_CFA_def_cfa_offset instruction takes a single unsigned LEB128
-    /// operand representing a (non-factored) offset. The required action is to define
-    /// the current CFA rule to use the provided offset (but to keep the old register).
-    /// This operation is valid only if the current CFA rule is defined to use a register
-    /// and offset.
+    /// operand representing a (non-factored) offset. The required action is to
+    /// define the current CFA rule to use the provided offset (but to keep
+    /// the old register). This operation is valid only if the current CFA
+    /// rule is defined to use a register and offset.
     DefCfaOffset(ULeb128),
     /// The DW_CFA_def_cfa_offset_sf instruction takes a signed LEB128 operand
     /// representing a factored offset. This instruction is identical to
-    /// DW_CFA_def_cfa_offset except that the operand is signed and factored. The
-    /// resulting offset is factored_offset * data_alignment_factor. This operation is
-    /// valid only if the current CFA rule is defined to use a register and offset.
+    /// DW_CFA_def_cfa_offset except that the operand is signed and factored.
+    /// The resulting offset is factored_offset * data_alignment_factor.
+    /// This operation is valid only if the current CFA rule is defined to
+    /// use a register and offset.
     DefCfaOffsetSf(ULeb128),
     /// The DW_CFA_def_cfa_expression instruction takes a single operand encoded
     /// as a DW_FORM_exprloc value representing a DWARF expression. The
-    /// required action is to establish that expression as the means by which the
-    /// current CFA is computed.
+    /// required action is to establish that expression as the means by which
+    /// the current CFA is computed.
     DefCfaExpression(Expr),
     //
     //-------- 6.4.2.3 Register Rule Instructions
     //
     /// The DW_CFA_undefined instruction takes a single unsigned LEB128 operand
-    /// that represents a register number. The required action is to set the rule for the
-    /// specified register to “undefined.”
+    /// that represents a register number. The required action is to set the
+    /// rule for the specified register to “undefined.”
     Undefined(ULeb128),
     /// The DW_CFA_same_value instruction takes a single unsigned LEB128
-    /// operand that represents a register number. The required action is to set the
-    /// rule for the specified register to “same value.”
+    /// operand that represents a register number. The required action is to set
+    /// the rule for the specified register to “same value.”
     SameValue(ULeb128),
     /// The DW_CFA_offset instruction takes two operands: a register number
     /// (encoded with the opcode) and an unsigned LEB128 constant representing a
-    /// factored offset. The required action is to change the rule for the register
-    /// indicated by the register number to be an offset(N) rule where the value of N
-    /// is factored offset * data_alignment_factor.
+    /// factored offset. The required action is to change the rule for the
+    /// register indicated by the register number to be an offset(N) rule
+    /// where the value of N is factored offset * data_alignment_factor.
     Offset {
         register_number: usize,
         factored_offset: ULeb128,
     },
     /// The DW_CFA_offset_extended instruction takes two unsigned LEB128
     /// operands representing a register number and a factored offset. This
-    /// instruction is identical to DW_CFA_offset except for the encoding and size of
-    /// the register operand.
+    /// instruction is identical to DW_CFA_offset except for the encoding and
+    /// size of the register operand.
     OffsetExtended {
         register_number: ULeb128,
         factored_offset: ULeb128,
@@ -249,81 +264,85 @@ pub enum Instruction {
     /// The DW_CFA_offset_extended_sf instruction takes two operands: an
     /// unsigned LEB128 value representing a register number and a signed LEB128
     /// factored offset. This instruction is identical to DW_CFA_offset_extended
-    /// except that the second operand is signed and factored. The resulting offset is
-    /// factored_offset * data_alignment_factor.
+    /// except that the second operand is signed and factored. The resulting
+    /// offset is factored_offset * data_alignment_factor.
     OffsetExtendedSf {
         register_number: ULeb128,
         factored_offste: ULeb128,
     },
     /// The DW_CFA_val_offset instruction takes two unsigned LEB128 operands
-    /// representing a register number and a factored offset. The required action is to
-    /// change the rule for the register indicated by the register number to be a
-    /// val_offset(N) rule where the value of N is factored_offset *
-    /// data_alignment_factor.
+    /// representing a register number and a factored offset. The required
+    /// action is to change the rule for the register indicated by the
+    /// register number to be a val_offset(N) rule where the value of N is
+    /// factored_offset * data_alignment_factor.
     ValOffset {
         register_number: ULeb128,
         factored_offste: ULeb128,
     },
     /// The DW_CFA_val_offset_sf instruction takes two operands: an unsigned
     /// LEB128 value representing a register number and a signed LEB128 factored
-    /// offset. This instruction is identical to DW_CFA_val_offset except that the
-    /// second operand is signed and factored. The resulting offset is factored_offset *
-    /// data_alignment_factor.
+    /// offset. This instruction is identical to DW_CFA_val_offset except that
+    /// the second operand is signed and factored. The resulting offset is
+    /// factored_offset * data_alignment_factor.
     ValOffsetSf {
         register_number: ULeb128,
         factored_offste: ULeb128,
     },
     /// The DW_CFA_register instruction takes two unsigned LEB128 operands
-    /// representing register numbers. The required action is to set the rule for the
-    /// first register to be register(R) where R is the second register.
+    /// representing register numbers. The required action is to set the rule
+    /// for the first register to be register(R) where R is the second
+    /// register.
     Register {
         target_register: ULeb128,
         from_register: ULeb128,
     },
     /// The DW_CFA_expression instruction takes two operands: an unsigned
     /// LEB128 value representing a register number, and a DW_FORM_block value
-    /// representing a DWARF expression. The required action is to change the rule
-    /// for the register indicated by the register number to be an expression(E) rule
-    /// where E is the DWARF expression. That is, the DWARF expression computes
-    /// the address. The value of the CFA is pushed on the DWARF evaluation stack
-    /// prior to execution of the DWARF expression.
-    /// See Section 6.4.2 on page 176 regarding restrictions on the DWARF expression
-    /// operators that can be used.
+    /// representing a DWARF expression. The required action is to change the
+    /// rule for the register indicated by the register number to be an
+    /// expression(E) rule where E is the DWARF expression. That is, the
+    /// DWARF expression computes the address. The value of the CFA is
+    /// pushed on the DWARF evaluation stack prior to execution of the DWARF
+    /// expression. See Section 6.4.2 on page 176 regarding restrictions on
+    /// the DWARF expression operators that can be used.
     Expression { register: ULeb128, expr: Expr },
     /// The DW_CFA_val_expression instruction takes two operands: an unsigned
     /// LEB128 value representing a register number, and a DW_FORM_block value
-    /// representing a DWARF expression. The required action is to change the rule
-    /// for the register indicated by the register number to be a val_expression(E)
-    /// rule where E is the DWARF expression. That is, the DWARF expression
-    /// computes the value of the given register. The value of the CFA is pushed on
-    /// the DWARF evaluation stack prior to execution of the DWARF expression.
-    /// See Section 6.4.2 on page 176 regarding restrictions on the DWARF expression
-    /// operators that can be used.
+    /// representing a DWARF expression. The required action is to change the
+    /// rule for the register indicated by the register number to be a
+    /// val_expression(E) rule where E is the DWARF expression. That is, the
+    /// DWARF expression computes the value of the given register. The value
+    /// of the CFA is pushed on the DWARF evaluation stack prior to
+    /// execution of the DWARF expression. See Section 6.4.2 on page 176
+    /// regarding restrictions on the DWARF expression operators that can be
+    /// used.
     ValExpression { register: ULeb128, expr: Expr },
     /// The DW_CFA_restore instruction takes a single operand (encoded with the
-    /// opcode) that represents a register number. The required action is to change
-    /// the rule for the indicated register to the rule assigned it by the
-    /// initial_instructions in the CIE.
+    /// opcode) that represents a register number. The required action is to
+    /// change the rule for the indicated register to the rule assigned it
+    /// by the initial_instructions in the CIE.
     Restore(usize),
     /// The DW_CFA_restore_extended instruction takes a single unsigned LEB128
-    /// operand that represents a register number. This instruction is identical to
-    /// DW_CFA_restore except for the encoding and size of the register operand.
+    /// operand that represents a register number. This instruction is identical
+    /// to DW_CFA_restore except for the encoding and size of the register
+    /// operand.
     RestoreExtended(ULeb128),
     //
     //-------- 6.4.2.4 Row State Instructions
     //
     /// The DW_CFA_remember_state instruction takes no operands. The required
-    /// action is to push the set of rules for every register onto an implicit stack.
+    /// action is to push the set of rules for every register onto an implicit
+    /// stack.
     RememberState,
     /// The DW_CFA_restore_state instruction takes no operands. The required
-    /// action is to pop the set of rules off the implicit stack and place them in the
-    /// current row.
+    /// action is to pop the set of rules off the implicit stack and place them
+    /// in the current row.
     RestoreState,
     //
     //-------- 6.4.2.5 Padding Instruction
     //
-    /// The DW_CFA_nop instruction has no operands and no required actions. It is
-    /// used as padding to make a CIE or FDE an appropriate size.
+    /// The DW_CFA_nop instruction has no operands and no required actions. It
+    /// is used as padding to make a CIE or FDE an appropriate size.
     Nop,
 }
 
@@ -474,29 +493,34 @@ fn parse_augmentation_data(string: &str, data: &[u8]) -> Result<()> {
     assert_eq!(codes.next(), Some(b'z'));
     trace!("aug data {:x?}", data.0);
 
-    let mut aug_data = AugmentationData {pointer_encoding: None};
+    let mut aug_data = AugmentationData {
+        pointer_encoding: None,
+    };
 
     for code in codes {
         match code {
-            // If present, it indicates the presence of one argument in the Augmentation Data of the CIE,
-            // and a corresponding argument in the Augmentation Data of the FDE.
-            // The argument in the Augmentation Data of the CIE is 1-byte and represents the pointer encoding
-            // used for the argument in the Augmentation Data of the FDE, which is the address of a language-specific
-            // data area (LSDA). The size of the LSDA pointer is specified by the pointer encoding used.
+            // If present, it indicates the presence of one argument in the Augmentation Data of the
+            // CIE, and a corresponding argument in the Augmentation Data of the FDE.
+            // The argument in the Augmentation Data of the CIE is 1-byte and represents the pointer
+            // encoding used for the argument in the Augmentation Data of the FDE, which
+            // is the address of a language-specific data area (LSDA). The size of the
+            // LSDA pointer is specified by the pointer encoding used.
             b'L' => {
                 let encoding = read_u8(data)?;
                 aug_data.lsda_pointer_encoding = Some(encoding);
             }
-            // If present, it indicates the presence of two arguments in the Augmentation Data of the CIE.
-            // The first argument is 1-byte and represents the pointer encoding used for the second argument,
-            // which is the address of a personality routine handler. The personality routine is used to handle
-            // language and vendor-specific tasks. The system unwind library interface accesses the language-specific
-            // exception handling semantics via the pointer to the personality routine. The personality routine does not
-            // have an ABI-specific name. The size of the personality routine pointer is specified by the pointer encoding used.
-            b'P' => {
-
-            }
-            // If present, The Augmentation Data shall include a 1 byte argument that represents the pointer encoding for the address pointers used in the FDE.
+            // If present, it indicates the presence of two arguments in the Augmentation Data of
+            // the CIE. The first argument is 1-byte and represents the pointer encoding
+            // used for the second argument, which is the address of a personality
+            // routine handler. The personality routine is used to handle language and
+            // vendor-specific tasks. The system unwind library interface accesses the
+            // language-specific exception handling semantics via the pointer to the
+            // personality routine. The personality routine does not
+            // have an ABI-specific name. The size of the personality routine pointer is specified
+            // by the pointer encoding used.
+            b'P' => {}
+            // If present, The Augmentation Data shall include a 1 byte argument that represents the
+            // pointer encoding for the address pointers used in the FDE.
             b'R' => {
                 let encoding = read_u8(data)?;
                 aug_data.pointer_encoding = Some(encoding);
@@ -512,9 +536,10 @@ pub(super) struct InstrIter {
 }
 
 impl InstrIter {
-    /// Create a new `InstrIter` that will parse DWARF call frame information from `data`.
-    /// # Safety
-    /// `data` must be a pointer to valid DWARF call frame information with a null terminator.
+    /// Create a new `InstrIter` that will parse DWARF call frame information
+    /// from `data`. # Safety
+    /// `data` must be a pointer to valid DWARF call frame information with a
+    /// null terminator.
     pub(super) unsafe fn new(data: *const u8) -> Self {
         // SAFETY: uses random ass pointer
         Self { data }
@@ -523,10 +548,11 @@ impl InstrIter {
     fn advance(&mut self) -> Option<u8> {
         // SAFETY: First, we assume that `data` currently points at a valid location.
         // After we read from it, we increment it. This has implications. We must assume
-        // that the dwarf parsing code in this module never calls `advance` more than it has to.
-        // This means that really `advance` should be unsafe, but marking it as unsafe would only make
-        // the code in here harder to read and not provide practical safety improvements.
-        // We do eagerly move the data pointer outside the bounds of the allocation, but only one
+        // that the dwarf parsing code in this module never calls `advance` more than it
+        // has to. This means that really `advance` should be unsafe, but
+        // marking it as unsafe would only make the code in here harder to read
+        // and not provide practical safety improvements. We do eagerly move the
+        // data pointer outside the bounds of the allocation, but only one
         // past the end, which is fine.
         unsafe {
             let first = self.data.read();

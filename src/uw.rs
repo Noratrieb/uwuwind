@@ -7,14 +7,17 @@ pub enum _Unwind_Reason_Code {
     /// Nested foreign exceptions, or re-throwing a foreign exception, result in
     /// undefined behavior.
     _URC_FOREIGN_EXCEPTION_CAUGHT = 1,
-    /// The personality routine encountered an error during phase 1, other than the specific error codes defined.
+    /// The personality routine encountered an error during phase 1, other than
+    /// the specific error codes defined.
     _URC_FATAL_PHASE1_ERROR = 3,
-    /// The personality routine encountered an error during phase 2, for instance a stack corruption.
+    /// The personality routine encountered an error during phase 2, for
+    /// instance a stack corruption.
     _URC_FATAL_PHASE2_ERROR = 2,
     _URC_NORMAL_STOP = 4,
-    /// The unwinder encountered the end of the stack during phase 1, without finding a handler.
-    /// The unwind runtime will not have modified the stack.
-    /// The C++ runtime will normally call uncaught_exception() in this case
+    /// The unwinder encountered the end of the stack during phase 1, without
+    /// finding a handler. The unwind runtime will not have modified the
+    /// stack. The C++ runtime will normally call uncaught_exception() in
+    /// this case
     _URC_END_OF_STACK = 5,
     _URC_HANDLER_FOUND = 6,
     _URC_INSTALL_CONTEXT = 7,
@@ -32,8 +35,10 @@ pub struct _Unwind_Exception {
 pub type _Unwind_Exception_Cleanup_Fn =
     fn(reason: _Unwind_Reason_Code, exc: *const _Unwind_Exception);
 
-/// The _Unwind_Context type is an opaque type used to refer to a system-specific data structure used by the system unwinder.
-/// This context is created and destroyed by the system, and passed to the personality routine during unwinding
+/// The _Unwind_Context type is an opaque type used to refer to a
+/// system-specific data structure used by the system unwinder. This context is
+/// created and destroyed by the system, and passed to the personality routine
+/// during unwinding
 pub struct _Unwind_Context {}
 
 pub type PersonalityRoutine = fn(

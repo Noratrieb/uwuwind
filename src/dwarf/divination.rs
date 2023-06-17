@@ -1,13 +1,15 @@
 //! # divination
 //!
-//! the practice of seeking knowledge of the future or the unknown by supernatural means.
+//! the practice of seeking knowledge of the future or the unknown by
+//! supernatural means.
 //!
 //! we ask supernatural means (the dynamic linker) for knowledge of the future
 //! (where we will find the dwarves)
 //!
-//! first, we ask the dynamic linker to give us the `.eh_frame` for the current binary using
-//! the GNU extension (`_dl_find_object`)[https://www.gnu.org/software/libc/manual/html_node/Dynamic-Linker-Introspection.html].
-//! then, we parse that as beautiful DWARF call frame information, as god (or rather, the x86-64 psABI) intended.
+//! first, we ask the dynamic linker to give us the `.eh_frame` for the current
+//! binary using the GNU extension (`_dl_find_object`)[https://www.gnu.org/software/libc/manual/html_node/Dynamic-Linker-Introspection.html].
+//! then, we parse that as beautiful DWARF call frame information, as god (or
+//! rather, the x86-64 psABI) intended.
 
 #![allow(non_camel_case_types)]
 
@@ -23,7 +25,8 @@ struct dl_find_object {
     dlfo_map_start: *const ffi::c_void,
     dlfo_map_end: *const ffi::c_void,
     dlf_link_map: *const ffi::c_void,
-    /// A pointer to the `PT_GNU_EH_FRAME` segment (the `.eh_frame_hdr` section).
+    /// A pointer to the `PT_GNU_EH_FRAME` segment (the `.eh_frame_hdr`
+    /// section).
     dlfo_eh_frame: *const ffi::c_void,
 }
 
@@ -164,7 +167,9 @@ impl fmt::Debug for Encoding {
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 enum ValueFormat {
-    /// Unsigned value is encoded using the Little Endian Base 128 (LEB128) as defined by DWARF Debugging Information Format, Revision 2.0.0 (July 27, 1993).
+    /// Unsigned value is encoded using the Little Endian Base 128 (LEB128) as
+    /// defined by DWARF Debugging Information Format, Revision 2.0.0 (July 27,
+    /// 1993).
     DW_EH_PE_uleb128 = 0x01,
     /// A 2 bytes unsigned value.
     DW_EH_PE_udata2 = 0x02,
@@ -172,7 +177,9 @@ enum ValueFormat {
     DW_EH_PE_udata4 = 0x03,
     /// An 8 bytes unsigned value.
     DW_EH_PE_udata8 = 0x04,
-    /// Signed value is encoded using the Little Endian Base 128 (LEB128) as defined by DWARF Debugging Information Format, Revision 2.0.0 (July 27, 1993).
+    /// Signed value is encoded using the Little Endian Base 128 (LEB128) as
+    /// defined by DWARF Debugging Information Format, Revision 2.0.0 (July 27,
+    /// 1993).
     DW_EH_PE_sleb128 = 0x09,
     /// A 2 bytes signed value.
     DW_EH_PE_sdata2 = 0x0A,

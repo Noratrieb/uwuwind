@@ -3,7 +3,8 @@
 
 extern crate alloc;
 
-use core::{ffi, sync::atomic::AtomicPtr};
+use core::ffi;
+use core::sync::atomic::AtomicPtr;
 
 // Get the macros into our local prelude.
 #[macro_use]
@@ -36,8 +37,8 @@ pub unsafe extern "C" fn _UnwindRaiseException(
     stdext::abort();
 }
 
-// This is normally provided by the language runtime through the unwind info block.
-// We don't want to access that usually because Rust messes with it :(.
+// This is normally provided by the language runtime through the unwind info
+// block. We don't want to access that usually because Rust messes with it :(.
 static PERSONALITY_ROUTINE: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
 
 pub unsafe fn set_personality_routine(routine: uw::PersonalityRoutine) {
