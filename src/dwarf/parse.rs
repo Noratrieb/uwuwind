@@ -27,9 +27,8 @@
 #[cfg(test)]
 mod tests;
 
-use core::ffi::CStr;
-
 use alloc::{format, string::String};
+use core::ffi::CStr;
 
 /// The dwarf is invalid. This is fatal and should never happen.
 #[derive(Debug)]

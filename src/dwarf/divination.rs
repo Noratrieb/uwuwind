@@ -15,9 +15,7 @@
 
 use core::{ffi, fmt};
 
-use crate::stdext::with_last_os_error_str;
-
-use crate::Addr;
+use crate::{stdext::with_last_os_error_str, Addr};
 
 #[repr(C)]
 struct dl_find_object {
