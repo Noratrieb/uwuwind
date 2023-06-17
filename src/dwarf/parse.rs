@@ -28,7 +28,7 @@
 mod tests;
 
 use alloc::{format, string::String};
-use core::ffi::CStr;
+use core::{ffi::CStr, fmt};
 
 /// The dwarf is invalid. This is fatal and should never happen.
 #[derive(Debug)]
@@ -358,6 +358,108 @@ pub unsafe fn parse_cfi(mut ptr: *const u8) {
 
 struct Cursor<'a>(&'a [u8]);
 
+/// Returns `(read_size, value)`
+pub(super) unsafe fn read_encoded(ptr: *const u8, encoding: Encoding) -> (usize, usize) {
+    let (read_size, value) = match encoding.format() {
+        ValueFormat::DW_EH_PE_uleb128 => todo!("uleb128"),
+        ValueFormat::DW_EH_PE_udata2 => (2, ptr.cast::<u16>().read_unaligned() as usize),
+        ValueFormat::DW_EH_PE_udata4 => (4, ptr.cast::<u32>().read_unaligned() as usize),
+        ValueFormat::DW_EH_PE_udata8 => (8, ptr.cast::<u64>().read_unaligned() as usize),
+        ValueFormat::DW_EH_PE_sleb128 => todo!("sleb128"),
+        ValueFormat::DW_EH_PE_sdata2 => (2, ptr.cast::<i16>().read_unaligned() as usize),
+        ValueFormat::DW_EH_PE_sdata4 => (4, ptr.cast::<i32>().read_unaligned() as usize),
+        ValueFormat::DW_EH_PE_sdata8 => (8, ptr.cast::<i64>().read_unaligned() as usize),
+    };
+
+    let value = match encoding.application() {
+        ValueApplication::DW_EH_PE_absptr => value,
+        ValueApplication::DW_EH_PE_pcrel => ((value as isize) + (ptr as isize)) as usize,
+        ValueApplication::DW_EH_PE_textrel => todo!("textrel"),
+        ValueApplication::DW_EH_PE_datarel => todo!("datarel"),
+        ValueApplication::DW_EH_PE_funcrel => todo!("funcrel"),
+        ValueApplication::DW_EH_PE_aligned => todo!("aligned"),
+    };
+
+    (read_size, value)
+}
+
+pub(super) struct Encoding(u8);
+impl Encoding {
+    fn format(&self) -> ValueFormat {
+        match self.0 & 0b1111 {
+            0x01 => ValueFormat::DW_EH_PE_uleb128,
+            0x02 => ValueFormat::DW_EH_PE_udata2,
+            0x03 => ValueFormat::DW_EH_PE_udata4,
+            0x04 => ValueFormat::DW_EH_PE_udata8,
+            0x09 => ValueFormat::DW_EH_PE_sleb128,
+            0x0A => ValueFormat::DW_EH_PE_sdata2,
+            0x0B => ValueFormat::DW_EH_PE_sdata4,
+            0x0C => ValueFormat::DW_EH_PE_sdata8,
+            _ => panic!("Invalid header value format"),
+        }
+    }
+    fn application(&self) -> ValueApplication {
+        match self.0 >> 4 {
+            0x0 => ValueApplication::DW_EH_PE_absptr,
+            0x1 => ValueApplication::DW_EH_PE_pcrel,
+            0x2 => ValueApplication::DW_EH_PE_textrel,
+            0x3 => ValueApplication::DW_EH_PE_datarel,
+            0x4 => ValueApplication::DW_EH_PE_funcrel,
+            0x5 => ValueApplication::DW_EH_PE_aligned,
+            v => panic!("invalid header value application: {v}"),
+        }
+    }
+}
+
+impl fmt::Debug for Encoding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?} | {:?}", self.application(), self.format())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+#[allow(non_camel_case_types)]
+enum ValueFormat {
+    /// Unsigned value is encoded using the Little Endian Base 128 (LEB128) as
+    /// defined by DWARF Debugging Information Format, Revision 2.0.0 (July 27,
+    /// 1993).
+    DW_EH_PE_uleb128 = 0x01,
+    /// A 2 bytes unsigned value.
+    DW_EH_PE_udata2 = 0x02,
+    /// A 4 bytes unsigned value.
+    DW_EH_PE_udata4 = 0x03,
+    /// An 8 bytes unsigned value.
+    DW_EH_PE_udata8 = 0x04,
+    /// Signed value is encoded using the Little Endian Base 128 (LEB128) as
+    /// defined by DWARF Debugging Information Format, Revision 2.0.0 (July 27,
+    /// 1993).
+    DW_EH_PE_sleb128 = 0x09,
+    /// A 2 bytes signed value.
+    DW_EH_PE_sdata2 = 0x0A,
+    /// A 4 bytes signed value.
+    DW_EH_PE_sdata4 = 0x0B,
+    /// An 8 bytes signed value.
+    DW_EH_PE_sdata8 = 0x0C,
+}
+
+#[derive(Debug)]
+#[repr(u8)]
+#[allow(non_camel_case_types)]
+enum ValueApplication {
+    DW_EH_PE_absptr = 0x00,
+    ///	Value is relative to the current program counter.
+    DW_EH_PE_pcrel = 0x10,
+    ///	Value is relative to the beginning of the .text section.
+    DW_EH_PE_textrel = 0x20,
+    ///	Value is relative to the beginning of the .got or .eh_frame_hdr section.
+    DW_EH_PE_datarel = 0x30,
+    ///	Value is relative to the beginning of the function.
+    DW_EH_PE_funcrel = 0x40,
+    ///	Value is aligned to an address unit sized boundary.
+    DW_EH_PE_aligned = 0x50,
+}
+
 fn read_bytes<'a>(data: &mut Cursor<'a>, amount: usize) -> Result<&'a [u8]> {
     if data.0.len() < amount {
         return Err(Error(format!(
@@ -452,7 +554,8 @@ fn parse_cie<'a>(data: &mut Cursor<'a>) -> Result<Cie<'a>> {
         let aug_len = read_uleb128(data)?;
         let aug_data = read_bytes(data, aug_len as usize)?;
 
-        parse_augmentation_data(augmentation, aug_data)?;
+        let aug = parse_augmentation_data(augmentation, aug_data)?;
+        trace!("{aug:?}");
 
         Some(aug_data)
     } else {
@@ -470,7 +573,7 @@ fn parse_cie<'a>(data: &mut Cursor<'a>) -> Result<Cie<'a>> {
         initial_instructions,
     };
 
-    trace!("{cie:#?}");
+    trace!("{cie:?}");
     Ok(cie)
 }
 
@@ -479,20 +582,24 @@ fn parse_fde<'a>(data: &mut Cursor<'a>, cie_id: u32) -> Result<Fde<'a>> {
     Err(Error("aa".into()))
 }
 
+#[derive(Debug)]
 struct AugmentationData {
-    lsda_pointer_encoding: Option<u8>,
-    pointer_encoding: Option<u8>,
+    lsda_pointer_encoding: Option<Encoding>,
+    pointer_encoding: Option<Encoding>,
+    personality: Option<usize>,
 }
 
-fn parse_augmentation_data(string: &str, data: &[u8]) -> Result<()> {
-    let mut data = &mut Cursor(data);
+fn parse_augmentation_data(string: &str, data: &[u8]) -> Result<AugmentationData> {
+    let data = &mut Cursor(data);
 
     let mut codes = string.bytes();
     assert_eq!(codes.next(), Some(b'z'));
-    trace!("aug data {:x?}", data.0);
+    trace!("aug data {:?} | {:x?}", string, data.0);
 
     let mut aug_data = AugmentationData {
         pointer_encoding: None,
+        lsda_pointer_encoding: None,
+        personality: None,
     };
 
     for code in codes {
@@ -504,8 +611,9 @@ fn parse_augmentation_data(string: &str, data: &[u8]) -> Result<()> {
             // is the address of a language-specific data area (LSDA). The size of the
             // LSDA pointer is specified by the pointer encoding used.
             b'L' => {
+                trace!("L");
                 let encoding = read_u8(data)?;
-                aug_data.lsda_pointer_encoding = Some(encoding);
+                aug_data.lsda_pointer_encoding = Some(Encoding(encoding));
             }
             // If present, it indicates the presence of two arguments in the Augmentation Data of
             // the CIE. The first argument is 1-byte and represents the pointer encoding
@@ -516,17 +624,24 @@ fn parse_augmentation_data(string: &str, data: &[u8]) -> Result<()> {
             // personality routine. The personality routine does not
             // have an ABI-specific name. The size of the personality routine pointer is specified
             // by the pointer encoding used.
-            b'P' => {}
+            b'P' => {
+                trace!("P");
+                let encoding = Encoding(read_u8(data)?);
+                let (read_size, value) = unsafe { read_encoded(data.0.as_ptr(), encoding) };
+                data.0 = &data.0[read_size..];
+                aug_data.personality = Some(value);
+            }
             // If present, The Augmentation Data shall include a 1 byte argument that represents the
             // pointer encoding for the address pointers used in the FDE.
             b'R' => {
                 let encoding = read_u8(data)?;
-                aug_data.pointer_encoding = Some(encoding);
+                aug_data.pointer_encoding = Some(Encoding(encoding));
             }
+            _ => return Err(Error(format!("invalid augmentation code: {code}"))),
         }
     }
 
-    Ok(())
+    Ok(aug_data)
 }
 
 pub(super) struct InstrIter {
