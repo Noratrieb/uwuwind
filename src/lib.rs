@@ -3,8 +3,7 @@
 
 extern crate alloc;
 
-use core::ffi;
-use core::sync::atomic::AtomicPtr;
+use core::{ffi, sync::atomic::AtomicPtr};
 
 // Get the macros into our local prelude.
 #[macro_use]

@@ -29,8 +29,7 @@ mod tests;
 
 use core::ffi::CStr;
 
-use alloc::format;
-use alloc::string::String;
+use alloc::{format, string::String};
 
 /// The dwarf is invalid. This is fatal and should never happen.
 #[derive(Debug)]

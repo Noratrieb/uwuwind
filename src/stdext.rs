@@ -1,5 +1,4 @@
-use core::fmt::Write;
-use core::{ffi, fmt};
+use core::{ffi, fmt, fmt::Write};
 
 pub struct LibCStdoutWriter;
 
