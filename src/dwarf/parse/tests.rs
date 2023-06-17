@@ -1,4 +1,4 @@
-use crate::dwarf::parse::Cie;
+use crate::dwarf::parse::{Cie, FrameInfo};
 
 #[test]
 fn parse_simple_cie() {
@@ -12,18 +12,18 @@ fn parse_simple_cie() {
         0x90, 1, 0, 0,
     ];
 
-    let cie = unsafe { super::parse_cie(data.as_ptr()) }.unwrap();
+    let cie = unsafe { super::parse_frame_info(data.as_ptr()) }.unwrap().0;
 
     assert_eq!(
         cie,
-        Cie {
+        FrameInfo::Cie(Cie {
             augmentation: "zR",
             code_alignment_factor: 1,
             data_alignment_factor: -8,
             return_address_register: 16,
             augmentation_data: Some(b"\x1B"),
             initial_instructions: &[0xc, 7, 8, 0x90, 1, 0, 0]
-        }
+        })
     );
 
     // llvm-dwarfdump output:

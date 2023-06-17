@@ -127,6 +127,7 @@ pub struct Cie<'a> {
 }
 
 /// Frame Description Entry
+#[derive(Debug, PartialEq)]
 pub struct Fde<'a> {
     /// A constant that gives the number of bytes of the header and instruction
     /// stream for this function, not including the length field itself (see Section 7.2.2
@@ -326,8 +327,16 @@ pub enum Instruction {
     Nop,
 }
 
-pub unsafe fn parse_cfi(ptr: *const u8) {
-    parse_cie(ptr).unwrap();
+#[derive(Debug, PartialEq)]
+enum FrameInfo<'a> {
+    Cie(Cie<'a>),
+    Fde(Fde<'a>),
+}
+
+pub unsafe fn parse_cfi(mut ptr: *const u8) {
+    loop {
+        ptr = parse_frame_info(ptr).unwrap().1;
+    }
 }
 
 struct Cursor<'a>(&'a [u8]);
@@ -394,19 +403,24 @@ fn read_ileb128(data: &mut Cursor<'_>) -> Result<i128> {
     Ok(result)
 }
 
-unsafe fn parse_cie<'a>(ptr: *const u8) -> Result<Cie<'a>> {
+unsafe fn parse_frame_info<'a>(ptr: *const u8) -> Result<(FrameInfo<'a>, *const u8)> {
     let len = ptr.cast::<u32>().read();
     if len == 0xffffffff {
         todo!("loooong dwarf, cannot handle.");
     }
     let data = &mut Cursor(core::slice::from_raw_parts(ptr.add(4), len as usize));
-    trace!("{:x?}", data.0);
+    trace!("frame info entry: {:x?}", data.0);
 
     let cie_id = read_u32(data)?;
-    if cie_id != 0 {
-        return Err(Error(format!("not a CIE"))); // TODO: we need to parse an FDE here.
+    let new_ptr = ptr.add(4).add(len as _);
+    if cie_id == 0 {
+        parse_cie(data).map(|cie| (FrameInfo::Cie(cie), new_ptr))
+    } else {
+        parse_fde(data, cie_id).map(|fde| (FrameInfo::Fde(fde), new_ptr))
     }
+}
 
+fn parse_cie<'a>(data: &mut Cursor<'a>) -> Result<Cie<'a>> {
     let version = read_u8(data)?;
     if version != 1 {
         return Err(Error(format!("version must be 1: {version}")));
@@ -420,6 +434,9 @@ unsafe fn parse_cie<'a>(ptr: *const u8) -> Result<Cie<'a>> {
     let augmentation_data = if augmentation.starts_with('z') {
         let aug_len = read_uleb128(data)?;
         let aug_data = read_bytes(data, aug_len as usize)?;
+
+        parse_augmentation_data(augmentation, aug_data)?;
+
         Some(aug_data)
     } else {
         None
@@ -436,8 +453,58 @@ unsafe fn parse_cie<'a>(ptr: *const u8) -> Result<Cie<'a>> {
         initial_instructions,
     };
 
-    trace!("total_len={len} {cie:#?}");
+    trace!("{cie:#?}");
     Ok(cie)
+}
+
+fn parse_fde<'a>(data: &mut Cursor<'a>, cie_id: u32) -> Result<Fde<'a>> {
+    trace!("FDE {:x?}", data.0);
+    Err(Error("aa".into()))
+}
+
+struct AugmentationData {
+    lsda_pointer_encoding: Option<u8>,
+    pointer_encoding: Option<u8>,
+}
+
+fn parse_augmentation_data(string: &str, data: &[u8]) -> Result<()> {
+    let mut data = &mut Cursor(data);
+
+    let mut codes = string.bytes();
+    assert_eq!(codes.next(), Some(b'z'));
+    trace!("aug data {:x?}", data.0);
+
+    let mut aug_data = AugmentationData {pointer_encoding: None};
+
+    for code in codes {
+        match code {
+            // If present, it indicates the presence of one argument in the Augmentation Data of the CIE,
+            // and a corresponding argument in the Augmentation Data of the FDE.
+            // The argument in the Augmentation Data of the CIE is 1-byte and represents the pointer encoding
+            // used for the argument in the Augmentation Data of the FDE, which is the address of a language-specific
+            // data area (LSDA). The size of the LSDA pointer is specified by the pointer encoding used.
+            b'L' => {
+                let encoding = read_u8(data)?;
+                aug_data.lsda_pointer_encoding = Some(encoding);
+            }
+            // If present, it indicates the presence of two arguments in the Augmentation Data of the CIE.
+            // The first argument is 1-byte and represents the pointer encoding used for the second argument,
+            // which is the address of a personality routine handler. The personality routine is used to handle
+            // language and vendor-specific tasks. The system unwind library interface accesses the language-specific
+            // exception handling semantics via the pointer to the personality routine. The personality routine does not
+            // have an ABI-specific name. The size of the personality routine pointer is specified by the pointer encoding used.
+            b'P' => {
+
+            }
+            // If present, The Augmentation Data shall include a 1 byte argument that represents the pointer encoding for the address pointers used in the FDE.
+            b'R' => {
+                let encoding = read_u8(data)?;
+                aug_data.pointer_encoding = Some(encoding);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub(super) struct InstrIter {
