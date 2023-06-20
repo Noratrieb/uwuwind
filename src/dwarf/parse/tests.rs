@@ -1,4 +1,4 @@
-use crate::dwarf::parse::{Cie, FrameInfo};
+use crate::dwarf::parse::{AugmentationData, Cie, Encoding, ValueApplication, ValueFormat};
 
 #[test]
 fn parse_simple_cie() {
@@ -16,14 +16,19 @@ fn parse_simple_cie() {
 
     assert_eq!(
         cie,
-        FrameInfo::Cie(Cie {
-            augmentation: "zR",
+        Cie {
+            augmentation: Some(AugmentationData {
+                lsda_pointer_encoding: None,
+                pointer_encoding: Some(Encoding(
+                    (ValueApplication::DW_EH_PE_pcrel as u8) | (ValueFormat::DW_EH_PE_sdata4 as u8)
+                )),
+                personality: None
+            }),
             code_alignment_factor: 1,
             data_alignment_factor: -8,
             return_address_register: 16,
-            augmentation_data: Some(b"\x1B"),
             initial_instructions: &[0xc, 7, 8, 0x90, 1, 0, 0]
-        })
+        }
     );
 
     // llvm-dwarfdump output:

@@ -105,7 +105,7 @@ pub struct Cie<'a> {
     /// Because the .debug_frame section is useful independently of any
     /// .debug_info section, the augmentation string always uses UTF-8
     /// encoding.
-    pub augmentation: &'a str,
+    pub augmentation: Option<AugmentationData>,
     /// A constant that is factored out of all advance location instructions
     /// (see Section 6.4.2.1 on page 177). The resulting value is
     /// (operand * code_alignment_factor).
@@ -118,11 +118,6 @@ pub struct Cie<'a> {
     /// table represents the return address of the function. Note that this
     /// column might not correspond to an actual machine register.
     pub return_address_register: u128,
-    /// A block of data whose contents are defined by the contents of the
-    /// Augmentation String as described below. This field is only present
-    /// if the Augmentation String contains the character 'z'. The size of
-    /// this data is given by the Augentation Length.
-    pub augmentation_data: Option<&'a [u8]>,
     /// A sequence of rules that are interpreted to create the initial setting
     /// of each column in the table.
     /// The default rule for all columns before interpretation of the initial
@@ -143,6 +138,13 @@ pub struct Fde<'a> {
     /// A constant offset into the .debug_frame section that denotes the CIE
     /// that is associated with this FDE.
     pub cie_pointer: Id,
+    /// A 4 byte unsigned value that when subtracted from the offset of the
+    /// CIE Pointer in the current FDE yields the offset of the start of the
+    /// associated CIE. This value shall never be 0.
+    pub pc_begin: usize,
+    /// An absolute value that indicates the number of bytes of instructions
+    /// associated with this FDE.
+    pub pc_range: usize,
     /// The address of the first location associated with this table entry. If
     /// the segment_selector_size field of this FDE’s CIE is non-zero, the
     /// initial location is preceded by a segment selector of the given
@@ -352,7 +354,7 @@ enum FrameInfo<'a> {
 
 pub unsafe fn parse_cfi(mut ptr: *const u8) {
     loop {
-        ptr = parse_frame_info(ptr).unwrap().1;
+        ptr = parse_frame_info(ptr).unwrap().2;
     }
 }
 
@@ -383,6 +385,7 @@ pub(super) unsafe fn read_encoded(ptr: *const u8, encoding: Encoding) -> (usize,
     (read_size, value)
 }
 
+#[derive(PartialEq, Clone, Copy)]
 pub(super) struct Encoding(u8);
 impl Encoding {
     fn format(&self) -> ValueFormat {
@@ -522,7 +525,31 @@ fn read_ileb128(data: &mut Cursor<'_>) -> Result<i128> {
     Ok(result)
 }
 
-unsafe fn parse_frame_info<'a>(ptr: *const u8) -> Result<(FrameInfo<'a>, *const u8)> {
+unsafe fn parse_frame_info<'a>(
+    ptr: *const u8,
+) -> Result<(Cie<'a>, alloc::vec::Vec<Fde<'a>>, *const u8)> {
+    let (cie_id, data, mut prev_ptr) = parse_frame_head(ptr)?;
+    if cie_id != 0 {
+        return Err(Error(format!("CIE must have cie_id=0")));
+    }
+    let data = &mut Cursor(data);
+    let cie = parse_cie(data)?;
+
+    let mut fdes = alloc::vec::Vec::new();
+
+    loop {
+        let (cie_id, data, newer_ptr) = parse_frame_head(ptr)?;
+        if cie_id != 0 {
+            return Ok((cie, fdes, prev_ptr));
+        }
+        prev_ptr = newer_ptr;
+        let data = &mut Cursor(data);
+        let fde = parse_fde(data, cie_id, &cie)?;
+        fdes.push(fde);
+    }
+}
+
+unsafe fn parse_frame_head<'a>(ptr: *const u8) -> Result<(u32, &'a [u8], *const u8)> {
     let len = ptr.cast::<u32>().read();
     if len == 0xffffffff {
         todo!("loooong dwarf, cannot handle.");
@@ -532,11 +559,8 @@ unsafe fn parse_frame_info<'a>(ptr: *const u8) -> Result<(FrameInfo<'a>, *const 
 
     let cie_id = read_u32(data)?;
     let new_ptr = ptr.add(4).add(len as _);
-    if cie_id == 0 {
-        parse_cie(data).map(|cie| (FrameInfo::Cie(cie), new_ptr))
-    } else {
-        parse_fde(data, cie_id).map(|fde| (FrameInfo::Fde(fde), new_ptr))
-    }
+
+    Ok((cie_id, data.0, new_ptr))
 }
 
 fn parse_cie<'a>(data: &mut Cursor<'a>) -> Result<Cie<'a>> {
@@ -555,9 +579,9 @@ fn parse_cie<'a>(data: &mut Cursor<'a>) -> Result<Cie<'a>> {
         let aug_data = read_bytes(data, aug_len as usize)?;
 
         let aug = parse_augmentation_data(augmentation, aug_data)?;
-        trace!("{aug:?}");
+        trace!("AUGMENTATION {aug:?}");
 
-        Some(aug_data)
+        Some(aug)
     } else {
         None
     };
@@ -565,11 +589,10 @@ fn parse_cie<'a>(data: &mut Cursor<'a>) -> Result<Cie<'a>> {
     let initial_instructions = data.0;
 
     let cie = Cie {
-        augmentation,
+        augmentation: augmentation_data,
         code_alignment_factor,
         data_alignment_factor,
         return_address_register,
-        augmentation_data,
         initial_instructions,
     };
 
@@ -577,16 +600,34 @@ fn parse_cie<'a>(data: &mut Cursor<'a>) -> Result<Cie<'a>> {
     Ok(cie)
 }
 
-fn parse_fde<'a>(data: &mut Cursor<'a>, cie_id: u32) -> Result<Fde<'a>> {
+fn parse_fde<'a>(data: &mut Cursor<'a>, cie_id: u32, cie: &Cie<'_>) -> Result<Fde<'a>> {
     trace!("FDE {:x?}", data.0);
+
+    let augmentation = cie
+        .augmentation
+        .as_ref()
+        .ok_or_else(|| Error("augmentation data not present for CIE with FDEs".into()))?;
+
+    let pointer_encoding = augmentation.pointer_encoding.ok_or_else(|| {
+        Error("pointer encoding not present in augmentation for CIE with FDEs".into())
+    })?;
+
+    let (read_size, pc_begin) = unsafe { read_encoded(data.0.as_ptr(), pointer_encoding) };
+    data.0 = &data.0[read_size..];
+
+    let (read_size, pc_range) = unsafe { read_encoded(data.0.as_ptr(), pointer_encoding) };
+    data.0 = &data.0[read_size..];
+
+    let augmentation_len = read_uleb128(data)?;
+    
     Err(Error("aa".into()))
 }
 
-#[derive(Debug)]
-struct AugmentationData {
-    lsda_pointer_encoding: Option<Encoding>,
-    pointer_encoding: Option<Encoding>,
-    personality: Option<usize>,
+#[derive(Debug, PartialEq)]
+pub struct AugmentationData {
+    pub(super) lsda_pointer_encoding: Option<Encoding>,
+    pub(super) pointer_encoding: Option<Encoding>,
+    pub(super) personality: Option<usize>,
 }
 
 fn parse_augmentation_data(string: &str, data: &[u8]) -> Result<AugmentationData> {
