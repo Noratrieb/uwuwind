@@ -103,8 +103,6 @@ pub(crate) fn eh_frame(addr: Addr) -> Option<*const u8> {
             core::slice::from_raw_parts(eh_frame_ptr as *const u8, 15)
         );
 
-        crate::dwarf::uwutables(eh_frame_ptr as *const u8);
-
         Some(eh_frame_ptr as *const u8)
     }
 }

@@ -106,6 +106,7 @@ pub struct Cie<'a> {
     /// .debug_info section, the augmentation string always uses UTF-8
     /// encoding.
     pub augmentation: Option<AugmentationData>,
+    pub augmentation_string: &'a str,
     /// A constant that is factored out of all advance location instructions
     /// (see Section 6.4.2.1 on page 177). The resulting value is
     /// (operand * code_alignment_factor).
@@ -539,12 +540,14 @@ unsafe fn parse_frame_info<'a>(
 
     loop {
         let (cie_id, data, newer_ptr) = parse_frame_head(ptr)?;
+        trace!("cie id: {cie_id}");
         if cie_id != 0 {
             return Ok((cie, fdes, prev_ptr));
         }
         prev_ptr = newer_ptr;
         let data = &mut Cursor(data);
         let fde = parse_fde(data, cie_id, &cie)?;
+        trace!("FDE: {fde:?}");
         fdes.push(fde);
     }
 }
@@ -590,6 +593,7 @@ fn parse_cie<'a>(data: &mut Cursor<'a>) -> Result<Cie<'a>> {
 
     let cie = Cie {
         augmentation: augmentation_data,
+        augmentation_string: augmentation,
         code_alignment_factor,
         data_alignment_factor,
         return_address_register,
@@ -608,6 +612,8 @@ fn parse_fde<'a>(data: &mut Cursor<'a>, cie_id: u32, cie: &Cie<'_>) -> Result<Fd
         .as_ref()
         .ok_or_else(|| Error("augmentation data not present for CIE with FDEs".into()))?;
 
+    trace!("augmentation: {augmentation:?}");
+
     let pointer_encoding = augmentation.pointer_encoding.ok_or_else(|| {
         Error("pointer encoding not present in augmentation for CIE with FDEs".into())
     })?;
@@ -618,8 +624,13 @@ fn parse_fde<'a>(data: &mut Cursor<'a>, cie_id: u32, cie: &Cie<'_>) -> Result<Fd
     let (read_size, pc_range) = unsafe { read_encoded(data.0.as_ptr(), pointer_encoding) };
     data.0 = &data.0[read_size..];
 
+    // This is only present if the aug data of the CIE contains z. But that is
+    // always the case?
     let augmentation_len = read_uleb128(data)?;
-    
+    let augmentation_data = &data.0[..(augmentation_len as usize)];
+    let data = parse_augmentation_data(cie.augmentation_string, augmentation_data)?;
+    trace!("debug data: {data:?}");
+
     Err(Error("aa".into()))
 }
 

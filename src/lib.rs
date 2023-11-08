@@ -31,7 +31,8 @@ pub unsafe extern "C" fn _UnwindRaiseException(
     exception_object: *mut uw::_Unwind_Exception,
 ) -> uw::_Unwind_Reason_Code {
     trace!("someone raised an exception with addr {exception_object:p}");
-    let _ = crate::dwarf::eh_frame(arch::get_rip()).unwrap();
+    let eh_frame = crate::dwarf::eh_frame(arch::get_rip()).unwrap();
+    crate::dwarf::uwutables(eh_frame);
 
     stdext::abort();
 }

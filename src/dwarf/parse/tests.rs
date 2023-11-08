@@ -24,6 +24,7 @@ fn parse_simple_cie() {
                 )),
                 personality: None
             }),
+            augmentation_string: "meow",
             code_alignment_factor: 1,
             data_alignment_factor: -8,
             return_address_register: 16,
