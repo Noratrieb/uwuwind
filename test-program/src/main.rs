@@ -1,3 +1,5 @@
+use tracing_subscriber::{layer::SubscriberExt, EnvFilter};
+use tracing_subscriber::util::SubscriberInitExt;
 use uwuwind::uw;
 
 #[repr(C)]
@@ -7,6 +9,18 @@ struct Exception {
 }
 
 fn main() {
+    let registry = tracing_subscriber::Registry::default().with(
+        EnvFilter::builder()
+            .with_default_directive(tracing::Level::TRACE.into())
+            .from_env()
+            .unwrap(),
+    );
+
+    let tree_layer = tracing_tree::HierarchicalLayer::new(2)
+        .with_targets(true)
+        .with_bracketed_fields(true);
+
+    registry.with(tree_layer).init();
     unsafe {
         uwuwind::set_personality_routine(personality_routine);
 

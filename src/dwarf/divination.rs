@@ -45,6 +45,7 @@ struct EhFrameHeader {
     table_enc: Encoding,
 }
 
+#[instrument]
 fn eh_frame_hdr_ptr(addr: Addr) -> Option<*const EhFrameHeader> {
     unsafe {
         let mut out = core::mem::zeroed();
@@ -76,6 +77,7 @@ fn eh_frame_hdr_ptr(addr: Addr) -> Option<*const EhFrameHeader> {
     }
 }
 
+#[instrument]
 pub(crate) fn eh_frame(addr: Addr) -> Option<*const u8> {
     unsafe {
         let ptr = eh_frame_hdr_ptr(addr)?;
@@ -89,7 +91,7 @@ pub(crate) fn eh_frame(addr: Addr) -> Option<*const u8> {
             return None;
         }
 
-        trace!("eh_frame_hdr: {:#?}", header);
+        trace!("eh_frame_hdr: {:?}", header);
 
         let (read_size, eh_frame_ptr) = read_encoded(ptr, header.eh_frame_ptr_enc);
         let ptr = ptr.add(read_size);

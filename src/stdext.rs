@@ -21,19 +21,6 @@ pub fn print(args: fmt::Arguments<'_>) -> fmt::Result {
     write!(LibCStdoutWriter, "{}", args)
 }
 
-macro_rules! trace {
-    ($($tt:tt)*) => {
-        // We separate out the format_args for rust-analyzer support.
-        match format_args!($($tt)*) {
-            args => {
-                $crate::stdext::print(::core::format_args!("UWUWIND TRACE | uwuwind/{}:{}: {}\n", file!(), line!(), args)).expect("failed to trace")
-            }
-        }
-    };
-}
-
-pub(crate) use trace;
-
 pub(crate) fn abort() -> ! {
     // SAFETY: We abort.
     unsafe { libc::abort() };

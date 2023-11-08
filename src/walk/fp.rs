@@ -1,6 +1,6 @@
 //! Test frame pointer walker. Not very good.
 
-use crate::{arch::get_rbp, stdext::trace};
+use crate::arch::get_rbp;
 
 pub(crate) unsafe fn walk() {
     let mut current_rbp = get_rbp().0.cast::<usize>();

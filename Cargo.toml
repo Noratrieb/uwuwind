@@ -1,4 +1,5 @@
 [workspace]
+members = ["test-program"]
 
 [package]
 name = "uwuwind"
@@ -9,6 +10,7 @@ edition = "2021"
 
 [dependencies]
 libc = { version = "0.2.140", default-features = false, features = ["extra_traits"] }
+tracing = { version = "0.1.40", default-features = false, features = ["attributes"] }
 
 [profile.dev]
 # the test binary needs uwutables

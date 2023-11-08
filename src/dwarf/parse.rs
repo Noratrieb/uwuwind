@@ -526,6 +526,7 @@ fn read_ileb128(data: &mut Cursor<'_>) -> Result<i128> {
     Ok(result)
 }
 
+#[instrument(ret)]
 unsafe fn parse_frame_info<'a>(
     ptr: *const u8,
 ) -> Result<(Cie<'a>, alloc::vec::Vec<Fde<'a>>, *const u8)> {
@@ -566,6 +567,7 @@ unsafe fn parse_frame_head<'a>(ptr: *const u8) -> Result<(u32, &'a [u8], *const 
     Ok((cie_id, data.0, new_ptr))
 }
 
+#[instrument(skip(data))]
 fn parse_cie<'a>(data: &mut Cursor<'a>) -> Result<Cie<'a>> {
     let version = read_u8(data)?;
     if version != 1 {
@@ -604,6 +606,7 @@ fn parse_cie<'a>(data: &mut Cursor<'a>) -> Result<Cie<'a>> {
     Ok(cie)
 }
 
+#[instrument(skip(data))]
 fn parse_fde<'a>(data: &mut Cursor<'a>, cie_id: u32, cie: &Cie<'_>) -> Result<Fde<'a>> {
     trace!("FDE {:x?}", data.0);
 
