@@ -25,13 +25,19 @@ impl Addr {
     fn voidptr(self) -> *const ffi::c_void {
         self.0.cast()
     }
+
+    fn addr(&self) -> usize {
+        self.0.addr()
+    }
 }
 
 #[allow(nonstandard_style)]
-pub unsafe extern "C" fn _UnwindRaiseException(
+pub unsafe extern "C-unwind" fn _UnwindRaiseException(
     exception_object: *mut uw::_Unwind_Exception,
 ) -> uw::_Unwind_Reason_Code {
     let _span = info_span!("_UnwindRaiseException", ?exception_object).entered();
+
+    let frame = crate::dwarf::frame_info(arch::get_rip());
 
     let eh_frame = crate::dwarf::eh_frame(arch::get_rip()).unwrap();
     crate::dwarf::uwutables(eh_frame);

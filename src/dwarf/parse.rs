@@ -362,23 +362,29 @@ pub unsafe fn parse_cfi(mut ptr: *const u8) {
 struct Cursor<'a>(&'a [u8]);
 
 /// Returns `(read_size, value)`
-pub(super) unsafe fn read_encoded(ptr: *const u8, encoding: Encoding) -> (usize, usize) {
+pub(super) unsafe fn read_encoded(
+    ptr: *const u8,
+    encoding: Encoding,
+    datarel_base: Option<usize>,
+) -> (usize, usize) {
     let (read_size, value) = match encoding.format() {
         ValueFormat::DW_EH_PE_uleb128 => todo!("uleb128"),
         ValueFormat::DW_EH_PE_udata2 => (2, ptr.cast::<u16>().read_unaligned() as usize),
         ValueFormat::DW_EH_PE_udata4 => (4, ptr.cast::<u32>().read_unaligned() as usize),
         ValueFormat::DW_EH_PE_udata8 => (8, ptr.cast::<u64>().read_unaligned() as usize),
         ValueFormat::DW_EH_PE_sleb128 => todo!("sleb128"),
-        ValueFormat::DW_EH_PE_sdata2 => (2, ptr.cast::<i16>().read_unaligned() as usize),
-        ValueFormat::DW_EH_PE_sdata4 => (4, ptr.cast::<i32>().read_unaligned() as usize),
-        ValueFormat::DW_EH_PE_sdata8 => (8, ptr.cast::<i64>().read_unaligned() as usize),
+        ValueFormat::DW_EH_PE_sdata2 => (2, ptr.cast::<i16>().read_unaligned() as isize as usize),
+        ValueFormat::DW_EH_PE_sdata4 => (4, ptr.cast::<i32>().read_unaligned() as isize as usize),
+        ValueFormat::DW_EH_PE_sdata8 => (8, ptr.cast::<i64>().read_unaligned() as isize as usize),
     };
 
     let value = match encoding.application() {
         ValueApplication::DW_EH_PE_absptr => value,
         ValueApplication::DW_EH_PE_pcrel => ((value as isize) + (ptr as isize)) as usize,
         ValueApplication::DW_EH_PE_textrel => todo!("textrel"),
-        ValueApplication::DW_EH_PE_datarel => todo!("datarel"),
+        ValueApplication::DW_EH_PE_datarel => {
+            ((value as isize) + (datarel_base.unwrap() as isize)) as usize
+        }
         ValueApplication::DW_EH_PE_funcrel => todo!("funcrel"),
         ValueApplication::DW_EH_PE_aligned => todo!("aligned"),
     };
@@ -387,6 +393,7 @@ pub(super) unsafe fn read_encoded(ptr: *const u8, encoding: Encoding) -> (usize,
 }
 
 #[derive(PartialEq, Clone, Copy)]
+#[repr(transparent)]
 pub(super) struct Encoding(u8);
 impl Encoding {
     fn format(&self) -> ValueFormat {
@@ -411,6 +418,18 @@ impl Encoding {
             0x4 => ValueApplication::DW_EH_PE_funcrel,
             0x5 => ValueApplication::DW_EH_PE_aligned,
             v => panic!("invalid header value application: {v}"),
+        }
+    }
+    pub(crate) fn size(&self) -> usize {
+        match self.format() {
+            ValueFormat::DW_EH_PE_uleb128 => panic!("uleb128 has no known size"),
+            ValueFormat::DW_EH_PE_udata2 => 2,
+            ValueFormat::DW_EH_PE_udata4 => 4,
+            ValueFormat::DW_EH_PE_udata8 => 8,
+            ValueFormat::DW_EH_PE_sleb128 => panic!("sleb128 has no known size"),
+            ValueFormat::DW_EH_PE_sdata2 => 2,
+            ValueFormat::DW_EH_PE_sdata4 => 4,
+            ValueFormat::DW_EH_PE_sdata8 => 8,
         }
     }
 }
@@ -456,7 +475,8 @@ enum ValueApplication {
     DW_EH_PE_pcrel = 0x10,
     ///	Value is relative to the beginning of the .text section.
     DW_EH_PE_textrel = 0x20,
-    ///	Value is relative to the beginning of the .got or .eh_frame_hdr section.
+    ///	Value is relative to the beginning of the .got or .eh_frame_hdr
+    /// section.
     DW_EH_PE_datarel = 0x30,
     ///	Value is relative to the beginning of the function.
     DW_EH_PE_funcrel = 0x40,
@@ -556,10 +576,11 @@ unsafe fn parse_frame_info<'a>(
 unsafe fn parse_frame_head<'a>(ptr: *const u8) -> Result<(u32, &'a [u8], *const u8)> {
     let len = ptr.cast::<u32>().read();
     if len == 0xffffffff {
+        // be careful, if you handle this you need to adjust the callers offsets lol lmao
         todo!("loooong dwarf, cannot handle.");
     }
     let data = &mut Cursor(core::slice::from_raw_parts(ptr.add(4), len as usize));
-    trace!("frame info entry: {:x?}", data.0);
+    trace!("frame info entry (without len): {:x?}", data.0);
 
     let cie_id = read_u32(data)?;
     let new_ptr = ptr.add(4).add(len as _);
@@ -606,6 +627,37 @@ fn parse_cie<'a>(data: &mut Cursor<'a>) -> Result<Cie<'a>> {
     Ok(cie)
 }
 
+pub(crate) unsafe fn parse_fde_from_ptr<'a>(
+    ptr: *const u8,
+    eh_frame_base: usize,
+) -> Result<Fde<'a>> {
+    let (fde_cie_id, fde_data, _) = parse_frame_head(ptr)?;
+    let fde_data = &mut Cursor(fde_data);
+
+    if fde_cie_id == 0 {
+        return Err(Error(format!("FDE's CIE Pointer is 0")));
+    }
+    trace!("FDE's CIE pointer: {fde_cie_id}");
+
+    let cie_ptr = ptr.byte_add(4 /* length */).byte_sub(fde_cie_id as usize);
+
+    trace!(
+        "CIE offset to .eh_frame: {:x}",
+        cie_ptr.addr() - (eh_frame_base)
+    );
+
+    let (cie_cie_id, cie_data, _) = parse_frame_head(cie_ptr)?;
+    if cie_cie_id != 0 {
+        return Err(Error(format!("CIE must have cie_id=0")));
+    }
+    let cie_data = &mut Cursor(cie_data);
+    let cie = parse_cie(cie_data)?;
+
+    let fde = parse_fde(fde_data, fde_cie_id, &cie)?;
+
+    Ok(fde)
+}
+
 #[instrument(skip(data))]
 fn parse_fde<'a>(data: &mut Cursor<'a>, cie_id: u32, cie: &Cie<'_>) -> Result<Fde<'a>> {
     trace!("FDE {:x?}", data.0);
@@ -621,10 +673,10 @@ fn parse_fde<'a>(data: &mut Cursor<'a>, cie_id: u32, cie: &Cie<'_>) -> Result<Fd
         Error("pointer encoding not present in augmentation for CIE with FDEs".into())
     })?;
 
-    let (read_size, pc_begin) = unsafe { read_encoded(data.0.as_ptr(), pointer_encoding) };
+    let (read_size, pc_begin) = unsafe { read_encoded(data.0.as_ptr(), pointer_encoding, None) };
     data.0 = &data.0[read_size..];
 
-    let (read_size, pc_range) = unsafe { read_encoded(data.0.as_ptr(), pointer_encoding) };
+    let (read_size, pc_range) = unsafe { read_encoded(data.0.as_ptr(), pointer_encoding, None) };
     data.0 = &data.0[read_size..];
 
     // This is only present if the aug data of the CIE contains z. But that is
@@ -682,7 +734,7 @@ fn parse_augmentation_data(string: &str, data: &[u8]) -> Result<AugmentationData
             b'P' => {
                 trace!("P");
                 let encoding = Encoding(read_u8(data)?);
-                let (read_size, value) = unsafe { read_encoded(data.0.as_ptr(), encoding) };
+                let (read_size, value) = unsafe { read_encoded(data.0.as_ptr(), encoding, None) };
                 data.0 = &data.0[read_size..];
                 aug_data.personality = Some(value);
             }

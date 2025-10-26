@@ -1,5 +1,4 @@
-use tracing_subscriber::{layer::SubscriberExt, EnvFilter};
-use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use uwuwind::uw;
 
 #[repr(C)]

@@ -43,6 +43,7 @@ struct EhFrameHeader {
     eh_frame_ptr_enc: Encoding,
     fde_count_enc: Encoding,
     table_enc: Encoding,
+    rest: (),
 }
 
 #[instrument]
@@ -93,9 +94,9 @@ pub(crate) fn eh_frame(addr: Addr) -> Option<*const u8> {
 
         trace!("eh_frame_hdr: {:?}", header);
 
-        let (read_size, eh_frame_ptr) = read_encoded(ptr, header.eh_frame_ptr_enc);
+        let (read_size, eh_frame_ptr) = read_encoded(ptr, header.eh_frame_ptr_enc, None);
         let ptr = ptr.add(read_size);
-        let (_read_size, fde_count) = read_encoded(ptr, header.fde_count_enc);
+        let (_read_size, fde_count) = read_encoded(ptr, header.fde_count_enc, None);
 
         trace!("eh_frame: {eh_frame_ptr:?}");
         trace!("fde_count: {fde_count:?}");
@@ -106,5 +107,98 @@ pub(crate) fn eh_frame(addr: Addr) -> Option<*const u8> {
         );
 
         Some(eh_frame_ptr as *const u8)
+    }
+}
+
+#[instrument]
+pub(crate) fn frame_info(addr: Addr) -> Option<()> {
+    unsafe {
+        let header_ptr = eh_frame_hdr_ptr(addr)?;
+        let eh_frame_header_addr = header_ptr.addr();
+        let header = header_ptr.read();
+
+        let ptr = (&raw const (*header_ptr).rest).cast::<u8>();
+        let (eh_frame_ptr_size, eh_frame_ptr) = read_encoded(ptr, header.eh_frame_ptr_enc, None);
+        let ptr = ptr.add(eh_frame_ptr_size);
+
+        let (fde_count_size, fde_count) =
+            read_encoded(ptr, header.fde_count_enc, Some(eh_frame_ptr));
+
+        trace!(?header.table_enc);
+
+        let table_ptr = ptr.add(fde_count_size);
+
+        let mut walk_table_ptr = table_ptr;
+        for i in 0..fde_count {
+            let (read, initial_loc) =
+                read_encoded(walk_table_ptr, header.table_enc, Some(eh_frame_header_addr));
+            walk_table_ptr = walk_table_ptr.add(read);
+            let (read, address) =
+                read_encoded(walk_table_ptr, header.table_enc, Some(eh_frame_header_addr));
+            walk_table_ptr = walk_table_ptr.add(read);
+
+            trace!(idx = ?i, "eh_frame_hdr table initial_loc={initial_loc:x} address={address:x}");
+        }
+
+        let table_half_entry_size = header.table_enc.size();
+
+        let mut base = 0;
+        let mut len = fde_count;
+        let found_fde;
+        loop {
+            if len == 1 {
+                found_fde = Some(base);
+                break;
+            }
+
+            let mid = base + len / 2;
+            let mid_ptr = table_ptr.byte_add(mid * table_half_entry_size * 2);
+
+            let (_, value) = read_encoded(mid_ptr, header.table_enc, Some(eh_frame_header_addr));
+
+            debug!(
+                ?base,
+                ?len,
+                ?mid,
+                "binary searching for {addr:?}: {value:x}"
+            );
+
+            match addr.addr().cmp(&value) {
+                core::cmp::Ordering::Less => {
+                    len = mid - base;
+                }
+                core::cmp::Ordering::Equal => {
+                    found_fde = Some(mid);
+                    break;
+                }
+                core::cmp::Ordering::Greater => {
+                    len = len - (mid - base);
+                    base = mid;
+                }
+            }
+        }
+
+        debug!("found FDE idx in binary search {found_fde:?}");
+
+        let fde_table_ptr = table_ptr.byte_add(found_fde.unwrap() * table_half_entry_size * 2);
+        let (_, fde_address) = read_encoded(
+            fde_table_ptr.byte_add(table_half_entry_size),
+            header.table_enc,
+            Some(eh_frame_header_addr),
+        );
+
+        trace!("found FDE at address {fde_address:x}");
+
+        let fde_ptr = core::ptr::with_exposed_provenance::<u8>(fde_address);
+
+        fde_ptr.read_volatile();
+
+        trace!("ptr is valid");
+
+        trace!("FDE offset to .eh_frame: {:x}", fde_ptr.addr() - (eh_frame_ptr));
+
+        let fde = crate::dwarf::parse::parse_fde_from_ptr(fde_ptr, eh_frame_ptr).unwrap();
+
+        todo!()
     }
 }
