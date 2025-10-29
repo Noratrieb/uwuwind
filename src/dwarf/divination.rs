@@ -112,6 +112,10 @@ pub(crate) fn eh_frame(addr: Addr) -> Option<*const u8> {
 
 #[instrument]
 pub(crate) fn frame_info(addr: Addr) -> Option<()> {
+    let symbol = crate::identify::identify(addr.addr());
+
+    debug!("getting frame information of {symbol:?}");
+
     unsafe {
         let header_ptr = eh_frame_hdr_ptr(addr)?;
         let eh_frame_header_addr = header_ptr.addr();
@@ -128,6 +132,7 @@ pub(crate) fn frame_info(addr: Addr) -> Option<()> {
 
         let table_ptr = ptr.add(fde_count_size);
 
+        /*
         let mut walk_table_ptr = table_ptr;
         for i in 0..fde_count {
             let (read, initial_loc) =
@@ -139,6 +144,7 @@ pub(crate) fn frame_info(addr: Addr) -> Option<()> {
 
             trace!(idx = ?i, "eh_frame_hdr table initial_loc={initial_loc:x} address={address:x}");
         }
+        */
 
         let table_half_entry_size = header.table_enc.size();
 
@@ -195,9 +201,23 @@ pub(crate) fn frame_info(addr: Addr) -> Option<()> {
 
         trace!("ptr is valid");
 
-        trace!("FDE offset to .eh_frame: {:x}", fde_ptr.addr() - (eh_frame_ptr));
+        trace!(
+            "FDE offset to .eh_frame: {:x}",
+            fde_ptr.addr() - (eh_frame_ptr)
+        );
 
         let fde = crate::dwarf::parse::parse_fde_from_ptr(fde_ptr, eh_frame_ptr).unwrap();
+
+        let fde_base_offset = addr.addr() - fde.initial_location;
+
+        trace!("fde initial location {:x}, address offset of {fde_base_offset}", fde.initial_location);
+
+        crate::dwarf::parse::process_instructions_cfa(
+            &fde.cie,
+            fde.initial_instructions,
+            fde.instructions,
+            fde_base_offset,
+        );
 
         todo!()
     }

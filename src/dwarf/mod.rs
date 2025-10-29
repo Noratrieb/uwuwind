@@ -9,16 +9,6 @@
 //! from .debug_frame from DWARF.
 
 mod divination;
-mod parse;
+pub(crate) mod parse;
 
 pub(crate) use divination::{eh_frame, frame_info};
-
-/// The `.eh_frame` section contains a list of call frame information records.
-/// Each CFI contains a CIE followed be one or more FDE records.
-#[instrument]
-pub unsafe fn uwutables(eh_frame: *const u8) {
-    trace!("getting uwutables from {:p}", eh_frame);
-    unsafe {
-        parse::parse_cfi(eh_frame);
-    }
-}

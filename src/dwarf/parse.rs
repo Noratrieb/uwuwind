@@ -28,7 +28,7 @@
 mod tests;
 
 use alloc::{format, string::String};
-use core::{ffi::CStr, fmt};
+use core::{ffi::CStr, fmt, ops::ControlFlow};
 
 /// The dwarf is invalid. This is fatal and should never happen.
 #[derive(Debug)]
@@ -85,7 +85,7 @@ impl ILeb128 {
 }
 
 /// Common Information Entry
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Cie<'a> {
     /// A null-terminated UTF-8 string that identifies the augmentation to this
     /// CIE or to the FDEs that use it. If a reader encounters an
@@ -110,15 +110,15 @@ pub struct Cie<'a> {
     /// A constant that is factored out of all advance location instructions
     /// (see Section 6.4.2.1 on page 177). The resulting value is
     /// (operand * code_alignment_factor).
-    pub code_alignment_factor: u128,
+    pub code_alignment_factor: usize,
     /// A constant that is factored out of certain offset instructions (see
     /// Sections 6.4.2.2 on page 177 and 6.4.2.3 on page 179). The resulting
     /// value is (operand * data_alignment_factor).
-    pub data_alignment_factor: i128,
+    pub data_alignment_factor: isize,
     /// An unsigned LEB128 constant that indicates which column in the rule
     /// table represents the return address of the function. Note that this
     /// column might not correspond to an actual machine register.
-    pub return_address_register: u128,
+    pub return_address_register: usize,
     /// A sequence of rules that are interpreted to create the initial setting
     /// of each column in the table.
     /// The default rule for all columns before interpretation of the initial
@@ -353,12 +353,6 @@ enum FrameInfo<'a> {
     Fde(Fde<'a>),
 }
 
-pub unsafe fn parse_cfi(mut ptr: *const u8) {
-    loop {
-        ptr = parse_frame_info(ptr).unwrap().2;
-    }
-}
-
 struct Cursor<'a>(&'a [u8]);
 
 /// Returns `(read_size, value)`
@@ -513,12 +507,12 @@ fn read_utf8_cstr<'a>(data: &mut Cursor<'a>) -> Result<&'a str> {
     data.0 = &data.0[(utf8.len() + 1)..];
     Ok(utf8)
 }
-fn read_uleb128(data: &mut Cursor<'_>) -> Result<u128> {
+fn read_uleb128(data: &mut Cursor<'_>) -> Result<usize> {
     let mut result = 0;
     let mut shift = 0;
     loop {
         let byte = read_u8(data)?;
-        result |= ((byte & 0b0111_1111) << shift) as u128;
+        result |= ((byte & 0b0111_1111) << shift) as usize;
         if (byte >> 7) == 0 {
             break;
         }
@@ -526,14 +520,14 @@ fn read_uleb128(data: &mut Cursor<'_>) -> Result<u128> {
     }
     Ok(result)
 }
-fn read_ileb128(data: &mut Cursor<'_>) -> Result<i128> {
+fn read_ileb128(data: &mut Cursor<'_>) -> Result<isize> {
     let mut result = 0;
     let mut shift = 0;
     let size = 8;
 
     let sign_bit_set = loop {
         let byte = read_u8(data)?;
-        result |= ((byte & 0b0111_1111) << shift) as i128;
+        result |= ((byte & 0b0111_1111) << shift) as isize;
         shift += 7;
         if (byte >> 7) == 0 {
             let sign_bit_set = ((byte >> 6) & 1) == 1;
@@ -546,37 +540,11 @@ fn read_ileb128(data: &mut Cursor<'_>) -> Result<i128> {
     Ok(result)
 }
 
-#[instrument(ret)]
-unsafe fn parse_frame_info<'a>(
-    ptr: *const u8,
-) -> Result<(Cie<'a>, alloc::vec::Vec<Fde<'a>>, *const u8)> {
-    let (cie_id, data, mut prev_ptr) = parse_frame_head(ptr)?;
-    if cie_id != 0 {
-        return Err(Error(format!("CIE must have cie_id=0")));
-    }
-    let data = &mut Cursor(data);
-    let cie = parse_cie(data)?;
-
-    let mut fdes = alloc::vec::Vec::new();
-
-    loop {
-        let (cie_id, data, newer_ptr) = parse_frame_head(ptr)?;
-        trace!("cie id: {cie_id}");
-        if cie_id != 0 {
-            return Ok((cie, fdes, prev_ptr));
-        }
-        prev_ptr = newer_ptr;
-        let data = &mut Cursor(data);
-        let fde = parse_fde(data, cie_id, &cie)?;
-        trace!("FDE: {fde:?}");
-        fdes.push(fde);
-    }
-}
-
 unsafe fn parse_frame_head<'a>(ptr: *const u8) -> Result<(u32, &'a [u8], *const u8)> {
     let len = ptr.cast::<u32>().read();
     if len == 0xffffffff {
-        // be careful, if you handle this you need to adjust the callers offsets lol lmao
+        // be careful, if you handle this you need to adjust the callers offsets lol
+        // lmao
         todo!("loooong dwarf, cannot handle.");
     }
     let data = &mut Cursor(core::slice::from_raw_parts(ptr.add(4), len as usize));
@@ -630,7 +598,7 @@ fn parse_cie<'a>(data: &mut Cursor<'a>) -> Result<Cie<'a>> {
 pub(crate) unsafe fn parse_fde_from_ptr<'a>(
     ptr: *const u8,
     eh_frame_base: usize,
-) -> Result<Fde<'a>> {
+) -> Result<ParsedFde<'a>> {
     let (fde_cie_id, fde_data, _) = parse_frame_head(ptr)?;
     let fde_data = &mut Cursor(fde_data);
 
@@ -651,15 +619,23 @@ pub(crate) unsafe fn parse_fde_from_ptr<'a>(
         return Err(Error(format!("CIE must have cie_id=0")));
     }
     let cie_data = &mut Cursor(cie_data);
-    let cie = parse_cie(cie_data)?;
+    let cie = parse_cie(cie_data).unwrap();
 
-    let fde = parse_fde(fde_data, fde_cie_id, &cie)?;
+    let fde = parse_fde(fde_data, fde_cie_id, cie).unwrap();
 
     Ok(fde)
 }
 
+pub(crate) struct ParsedFde<'a> {
+    pub(crate) initial_location: usize,
+    pub(crate) address_range: usize,
+    pub(crate) initial_instructions: &'a [u8],
+    pub(crate) instructions: &'a [u8],
+    pub(crate) cie: Cie<'a>,
+}
+
 #[instrument(skip(data))]
-fn parse_fde<'a>(data: &mut Cursor<'a>, cie_id: u32, cie: &Cie<'_>) -> Result<Fde<'a>> {
+fn parse_fde<'a>(data: &mut Cursor<'a>, cie_id: u32, cie: Cie<'a>) -> Result<ParsedFde<'a>> {
     trace!("FDE {:x?}", data.0);
 
     let augmentation = cie
@@ -673,23 +649,39 @@ fn parse_fde<'a>(data: &mut Cursor<'a>, cie_id: u32, cie: &Cie<'_>) -> Result<Fd
         Error("pointer encoding not present in augmentation for CIE with FDEs".into())
     })?;
 
-    let (read_size, pc_begin) = unsafe { read_encoded(data.0.as_ptr(), pointer_encoding, None) };
+    let (read_size, initial_location) =
+        unsafe { read_encoded(data.0.as_ptr(), pointer_encoding, None) };
     data.0 = &data.0[read_size..];
 
-    let (read_size, pc_range) = unsafe { read_encoded(data.0.as_ptr(), pointer_encoding, None) };
+    let (read_size, address_range) =
+        unsafe { read_encoded(data.0.as_ptr(), pointer_encoding, None) };
     data.0 = &data.0[read_size..];
 
     // This is only present if the aug data of the CIE contains z. But that is
     // always the case?
-    let augmentation_len = read_uleb128(data)?;
-    let augmentation_data = &data.0[..(augmentation_len as usize)];
-    let data = parse_augmentation_data(cie.augmentation_string, augmentation_data)?;
-    trace!("debug data: {data:?}");
+    if cie.augmentation.is_some() {
+        let augmentation_len = read_uleb128(data)?;
+        if augmentation_len != 0 {
+            trace!(%augmentation_len, "augmentation length");
+            let augmentation_data = &data.0[..(augmentation_len as usize)];
+            let data = parse_augmentation_data(cie.augmentation_string, augmentation_data)?;
+            trace!("debug data: {data:?}");
+            todo!()
+        }
+    }
 
-    Err(Error("aa".into()))
+    trace!("fde rest: {:x?}", data.0);
+
+    Ok(ParsedFde {
+        initial_location,
+        address_range,
+        instructions: data.0,
+        initial_instructions: cie.initial_instructions,
+        cie,
+    })
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct AugmentationData {
     pub(super) lsda_pointer_encoding: Option<Encoding>,
     pub(super) pointer_encoding: Option<Encoding>,
@@ -751,38 +743,32 @@ fn parse_augmentation_data(string: &str, data: &[u8]) -> Result<AugmentationData
     Ok(aug_data)
 }
 
-pub(super) struct InstrIter {
-    data: *const u8,
+pub(super) struct InstructionParser<'a> {
+    data: core::slice::Iter<'a, u8>,
 }
 
-impl InstrIter {
-    /// Create a new `InstrIter` that will parse DWARF call frame information
-    /// from `data`. # Safety
-    /// `data` must be a pointer to valid DWARF call frame information with a
-    /// null terminator.
-    pub(super) unsafe fn new(data: *const u8) -> Self {
-        // SAFETY: uses random ass pointer
-        Self { data }
+impl<'a> InstructionParser<'a> {
+    pub(super) fn new(data: &'a [u8]) -> Self {
+        Self { data: data.iter() }
     }
 
     fn advance(&mut self) -> Option<u8> {
-        // SAFETY: First, we assume that `data` currently points at a valid location.
-        // After we read from it, we increment it. This has implications. We must assume
-        // that the dwarf parsing code in this module never calls `advance` more than it
-        // has to. This means that really `advance` should be unsafe, but
-        // marking it as unsafe would only make the code in here harder to read
-        // and not provide practical safety improvements. We do eagerly move the
-        // data pointer outside the bounds of the allocation, but only one
-        // past the end, which is fine.
-        unsafe {
-            let first = self.data.read();
-            self.data = self.data.add(1);
-            Some(first)
-        }
+        self.data.next().copied()
     }
 
-    fn uleb128(&mut self) -> ULeb128 {
-        ULeb128::parse()
+    fn uleb128(&mut self) -> usize {
+        let mut acc = 0_usize;
+        loop {
+            let b = self.advance().unwrap();
+            let most = b & 0b1000_0000;
+            let rest = b & 0b0111_1111;
+
+            acc = (acc << 7) | (rest as usize);
+
+            if most == 0 {
+                return acc;
+            }
+        }
     }
 }
 
@@ -816,82 +802,143 @@ const DW_CFA_val_expression: u8 = 0x16;
 const DW_CFA_lo_user: u8 = 0x1c;
 const DW_CFA_hi_user: u8 = 0x3f;
 
-impl Iterator for InstrIter {
-    type Item = Instruction;
+#[cfg(target_arch = "x86_64")]
+pub(crate) mod arch {
+    pub(crate) const REG_FRAME_POINTER: usize = 6;
+    pub(crate) const RETURN_ADDRESS: usize = 16;
+}
 
-    #[allow(unreachable_code)]
-    fn next(&mut self) -> Option<Self::Item> {
-        let b = self.advance()?;
-        let high_2 = b & !(u8::MAX >> 2);
-        Some(match high_2 {
+#[derive(Debug)]
+struct CfaState {
+    cfa_rule_register: usize,
+    cfa_rule_offset: usize,
+    register_states: [RegisterState; 32],
+    current_offset: usize,
+    target_offset: usize,
+}
+
+impl CfaState {
+    fn advance(&mut self, count: usize) -> ControlFlow<()> {
+        if self.current_offset + count > self.target_offset {
+            ControlFlow::Break(())
+        } else {
+            self.current_offset += count;
+            ControlFlow::Continue(())
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RegisterState {
+    Undefined,
+    SameValue,
+    Offset(isize),
+    ValOffset(isize),
+    Register(usize),
+}
+
+const DATA_ALIGNMENT_FACTOR: usize = 1;
+
+fn process_instruction_cfa_inner(ins: &mut InstructionParser, cfa: &mut CfaState, cie: &Cie<'_>) {
+    let span = tracing::info_span!("process_instruction_cfa_inner");
+    let _guard = span.enter();
+
+    while let Some(b) = ins.advance() {
+        match b >> 6 {
             DW_CFA_advance_loc_hi => {
-                let delta = b & (u8::MAX >> 2);
-                Instruction::AdvanceLoc(delta)
-            }
-            DW_CFA_offset_hi => {
-                let register = b & (u8::MAX >> 2);
-                Instruction::Offset {
-                    register_number: register as _,
-                    factored_offset: self.uleb128(),
+                let delta = (b << 2) >> 2;
+
+                trace!(?delta, "DW_CFA_advance_loc");
+
+                match cfa.advance(delta as usize) {
+                    ControlFlow::Continue(()) => {}
+                    ControlFlow::Break(()) => return,
                 }
             }
+            DW_CFA_offset_hi => {
+                let register = (b << 2) >> 2;
+                let factored_offset = ins.uleb128();
+
+                trace!(?register, ?factored_offset, "DW_CFA_offset");
+
+                cfa.register_states[register as usize] =
+                    RegisterState::Offset(factored_offset as isize * cie.data_alignment_factor);
+            }
             DW_CFA_restore_hi => {
-                let register = b & (u8::MAX >> 2);
-                Instruction::Restore(register as _)
+                let register = (b << 2) >> 2;
+                todo!()
             }
             _ => match b {
-                DW_CFA_nop => Instruction::Nop,
-                DW_CFA_set_loc => Instruction::SetLoc(todo!()),
-                DW_CFA_advance_loc1 => Instruction::AdvanceLoc1(todo!()),
-                DW_CFA_advance_loc2 => Instruction::AdvanceLoc2(todo!()),
-                DW_CFA_advance_loc4 => Instruction::AdvanceLoc4(todo!()),
-                DW_CFA_offset_extended => Instruction::OffsetExtended {
-                    register_number: self.uleb128(),
-                    factored_offset: self.uleb128(),
-                },
-                DW_CFA_restore_extended => Instruction::RestoreExtended(self.uleb128()),
-                DW_CFA_undefined => Instruction::Undefined(self.uleb128()),
-                DW_CFA_same_value => Instruction::SameValue(self.uleb128()),
-                DW_CFA_register => Instruction::Register {
-                    target_register: self.uleb128(),
-                    from_register: self.uleb128(),
-                },
-                DW_CFA_remember_state => Instruction::RememberState,
-                DW_CFA_restore_state => Instruction::RestoreState,
-                DW_CFA_def_cfa => Instruction::DefCfa {
-                    register_number: self.uleb128(),
-                    offset: self.uleb128(),
-                },
-                DW_CFA_def_cfa_register => Instruction::DefCfaRegister(self.uleb128()),
-                DW_CFA_def_cfa_offset => Instruction::DefCfaOffset(self.uleb128()),
-                DW_CFA_def_cfa_expression => Instruction::DefCfaExpression(todo!()),
-                DW_CFA_expression => Instruction::Expression {
-                    register: self.uleb128(),
-                    expr: todo!(),
-                },
-                DW_CFA_offset_extended_sf => Instruction::OffsetExtendedSf {
-                    register_number: self.uleb128(),
-                    factored_offste: self.uleb128(),
-                },
-                DW_CFA_def_cfa_sf => Instruction::DefCfaSf {
-                    register_number: self.uleb128(),
-                    offset: self.uleb128(),
-                },
-                DW_CFA_def_cfa_offset_sf => Instruction::DefCfaOffsetSf(self.uleb128()),
-                DW_CFA_val_offset => Instruction::ValOffset {
-                    register_number: self.uleb128(),
-                    factored_offste: self.uleb128(),
-                },
-                DW_CFA_val_offset_sf => Instruction::ValOffsetSf {
-                    register_number: self.uleb128(),
-                    factored_offste: self.uleb128(),
-                },
-                DW_CFA_val_expression => Instruction::ValExpression {
-                    register: self.uleb128(),
-                    expr: todo!(),
-                },
+                DW_CFA_nop => {
+                    trace!("DW_CFA_nop");
+                }
+                DW_CFA_set_loc => todo!(),
+                DW_CFA_advance_loc1 => todo!(),
+                DW_CFA_advance_loc2 => todo!(),
+                DW_CFA_advance_loc4 => todo!(),
+                DW_CFA_offset_extended => {
+                    let register_number = ins.uleb128();
+                    let factored_offset = ins.uleb128();
+                    todo!()
+                }
+                DW_CFA_restore_extended => todo!(),
+                DW_CFA_undefined => todo!(),
+                DW_CFA_same_value => todo!(),
+                DW_CFA_register => todo!(),
+                DW_CFA_remember_state => todo!(),
+                DW_CFA_restore_state => todo!(),
+                DW_CFA_def_cfa => {
+                    let register = ins.uleb128();
+                    let offset = ins.uleb128();
+                    trace!(?register, ?offset, "def_cfa");
+                    cfa.cfa_rule_register = register;
+                    cfa.cfa_rule_offset = offset;
+                }
+                DW_CFA_def_cfa_register => {
+                    let register = ins.uleb128();
+                    trace!(?register, "DW_CFA_def_cfa_register");
+                    cfa.cfa_rule_register = register;
+                }
+                DW_CFA_def_cfa_offset => {
+                    let offset = ins.uleb128();
+                    trace!(?offset, "DW_CFA_def_cfa_offset");
+                    cfa.cfa_rule_offset = offset;
+                }
+                DW_CFA_def_cfa_expression => todo!(),
+                DW_CFA_expression => todo!(),
+                DW_CFA_offset_extended_sf => todo!(),
+                DW_CFA_def_cfa_sf => todo!(),
+                DW_CFA_def_cfa_offset_sf => todo!(),
+                DW_CFA_val_offset => todo!(),
+                DW_CFA_val_offset_sf => todo!(),
+                DW_CFA_val_expression => todo!(),
                 _ => todo!(),
             },
-        })
+        }
     }
+}
+
+pub(crate) fn process_instructions_cfa(
+    cie: &Cie<'_>,
+    initial_instructions: &[u8],
+    instructions: &[u8],
+    to_offset: usize,
+) {
+    debug!("process instructions: {initial_instructions:x?}, {instructions:x?}");
+
+    let mut cfa = CfaState {
+        cfa_rule_offset: 0,
+        cfa_rule_register: 0,
+        register_states: [RegisterState::Undefined; 32],
+        current_offset: 0,
+        target_offset: to_offset,
+    };
+
+    let mut ins = InstructionParser::new(initial_instructions);
+    process_instruction_cfa_inner(&mut ins, &mut cfa, cie);
+
+    let mut ins = InstructionParser::new(instructions);
+    process_instruction_cfa_inner(&mut ins, &mut cfa, cie);
+
+    trace!("{cfa:?}");
 }

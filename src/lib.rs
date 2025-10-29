@@ -37,19 +37,11 @@ pub unsafe extern "C-unwind" fn _UnwindRaiseException(
 ) -> uw::_Unwind_Reason_Code {
     let _span = info_span!("_UnwindRaiseException", ?exception_object).entered();
 
-    let frame = crate::dwarf::frame_info(arch::get_rip());
+    let ctx = arch::capture_context();
 
-    let eh_frame = crate::dwarf::eh_frame(arch::get_rip()).unwrap();
-    crate::dwarf::uwutables(eh_frame);
+    let frame = crate::dwarf::frame_info(Addr(core::ptr::with_exposed_provenance(
+        ctx.registers[dwarf::parse::arch::RETURN_ADDRESS],
+    )));
 
     stdext::abort();
-}
-
-// This is normally provided by the language runtime through the unwind info
-// block. We don't want to access that usually because Rust messes with it :(.
-static PERSONALITY_ROUTINE: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
-
-pub unsafe fn set_personality_routine(routine: uw::PersonalityRoutine) {
-    let ptr: *mut () = core::mem::transmute(routine);
-    PERSONALITY_ROUTINE.store(ptr, core::sync::atomic::Ordering::Relaxed);
 }
